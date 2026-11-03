@@ -35,9 +35,11 @@ stream ends with `data: [DONE]`. Usage and cost are still recorded.
 
 **Keys, limits, budgets:** authenticate every request with a virtual key. Enforce a
 per-key model allowlist, requests-per-minute limit and monthly cost budget. Return a
-distinct, documented error for each rejection: invalid key, model not allowed, rate
-limited, budget exhausted. (Proposed status codes: 401, 403, 429, 402. Confirm against the
-provided scripts and document them in the README.)
+distinct, documented error for each rejection, as an OpenAI-style body
+`{"error": {"message", "type", "code"}}`. Mapping from docs/API_CONTRACT.md:
+401 `authentication_error`, 403 `model_not_allowed`, 429 `rate_limit_exceeded`,
+429 or 402 `budget_exceeded` (our choice, document it), 404 `not_found_error` (unknown
+model/alias), 502 `upstream_error` (all providers failed).
 
 **Routing and failover:** aliases resolve to a primary model plus an ordered fallback
 chain. Retry transient errors with exponential backoff, then fail over and record it.
@@ -125,12 +127,13 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 
 ## Plan (rough estimates for focused full-time work)
 
-- [ ] **Phase 0: Setup and data (~0.5 day).** Setup half done (see status). Remaining:
-  README skeleton, inspect the three data files, design tables (keys, usage, request logs,
-  cache entries), write the loader. Done when: startup loads everything and seed keys are
-  queryable.
-- [ ] **Phase 1: Provider adapter and mocks (~1 day).** Adapter interface for chat and
-  streaming. Two mocks that can inject latency, 429, 500 or go down. Timeout on every call.
+- [x] **Phase 0: Setup and data.** Done: venv, deps, pack data copied in, SQLite schema,
+  seed loader, 10 tests passing, seeded DB verified (4 tenants). README skeleton still TODO.
+- [x] **Phase 1: Provider adapter (~1 day).** (code written and tested, see status) The course pack PROVIDES the mock providers
+  (`scripts/mock_provider.py`, stdlib only, ports 9001/9002, names alpha/beta, failure
+  injection via `POST /admin/config` with mode ok/down/rate_limited, fail_rate, latency_ms).
+  Do not rebuild them. Build the adapter interface (chat, stream) with httpx against them,
+  a timeout on every call, and an in-process fake for unit tests.
 - [ ] **Phase 2: Core API, auth, headers (~1 day).** Non-streaming `/v1/chat/completions`,
   virtual-key auth, alias resolution, four headers, cost from price table.
 - [ ] **Phase 3: Streaming (~1 day).** Chunk pass-through, `data: [DONE]`, usage recorded in
@@ -151,21 +154,74 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 
 ## Current status
 
-- Phase 0, setup half: DONE. `.venv` works, all dependencies installed, `.gitignore` at the
-  repo root, `app/main.py` serves `GET /health` (returns `{"status": "ok"}`),
-  `tests/test_health.py` passes (`1 passed`, no warnings), `pytest.ini` configured.
-- First commit made locally ("Phase 0: venv, dependencies, health endpoint, first test").
-  The push was failing with an authentication error; fix by using a fine-grained personal
-  access token (Contents: read and write on this repo) or `gh auth login`, then `git push`.
-  Confirm the push landed before starting the next step.
-- Provided data files (`model_pricing.json`, `seed_keys.json`, `gateway_config.sample.json`)
-  and scripts (`scripts/smoke_test.py`, `scripts/load_test.py`) are NOT in the repo yet.
-  Get them from the course material or `airtribe-projects/prism-capstone`, put data files in
-  `data/` and scripts in `scripts/`.
-- Next: read the real data files and scripts, then design the SQLite schema (keys, usage,
-  request logs, cache entries) and write the loader. Check the proposed error codes and alias
-  names against what the files and scripts actually use, and fix anything in this file that
-  turns out to be wrong.
+- Phase 0 DONE and pushed: setup, pack data in `data/ docs/ scripts/`, SQLite schema
+  (`app/db.py`), nano-USD money helpers (`app/money.py`), seed loader (`app/seed.py`),
+  settings (`app/config.py`).
+- Phase 1 DONE (verify push): `app/providers/` has `base.py` (contract: `ProviderAdapter`,
+  `ChatResult`, `StreamChunk`, `Usage`, `ProviderError`, `MidStreamError`),
+  `openai_compat.py` (httpx adapter, timeouts, error classification, stream parsing),
+  `fake.py` (scriptable in-process fake for tests), `registry.py` (builds adapters from
+  config, `provider_for(model)`). `app/main.py` builds the registry at startup. 43 tests pass,
+  including `tests/test_mock_integration.py` which runs the real `scripts/mock_provider.py`.
+- `ruff.toml` excludes `scripts/` (provided files). Ruff 0.17 default rules are broad, so
+  keep async tests free of blocking calls (use `httpx.AsyncClient` in async tests).
+- Next: Phase 2, core API: `POST /v1/chat/completions` (non-streaming), virtual-key auth,
+  alias resolution via the registry, the four `x-prism-*` headers, cost from the price
+  table (integer nano-USD), request logging. Run on port 8080 and run `scripts/smoke_test.py`.
+
+### Phase 1 design decisions (feed the README)
+
+- Adapter returns provider-reported usage; a 200 without usage is `malformed_response`
+  because cost metering depends on it.
+- `ProviderError.kind`: connect, network, timeout, rate_limited, server_error, client_error,
+  malformed_response, stream_interrupted. `transient` = retrying the same provider may help
+  (connect, network, timeout, 429, 5xx). Failover policy belongs to the gateway (Phase 5).
+- `str(error)` is safe to show; `error.detail` (upstream message, key redacted) is for logs
+  only and must never reach callers.
+- Failure after the first streamed chunk raises `MidStreamError`: end the client stream with
+  an error event, never fail over or splice another provider's output.
+- Adapter yields parsed chunks and consumes upstream `[DONE]`; the gateway writes its own
+  `data: [DONE]` so it controls termination. Streams request `stream_options.include_usage`.
+- Timeout default 2.0s (`PRISM_PROVIDER_TIMEOUT_S`), low so the 3s slow-provider demo trips
+  it. For streams, `read` timeout bounds the gap between chunks. Real providers need more.
+- Model to provider rule: a provider serves models named `<provider>-...`, or lists them in an
+  optional `models` array in its config entry.
+- Provider API keys currently live in `gateway_config.sample.json` (mock keys only). Real keys
+  must come from env or an uncommitted file. Document in README.
+
+### Facts from the pack that shape the design
+
+- Gateway must listen on port 8080 (the scripts' default URL); admin token is enough for
+  admin routes.
+- Seed keys: search (`prism-sk-search-1a2b3c`, allowlist fast, cache 0.92), research
+  (`prism-sk-research-4d5e6f`, fast/smart/auto, cache off), free-tier
+  (`prism-sk-free-7g8h9i`, 10 rpm, cache 0.85), budget-demo (`prism-sk-budget-demo-0j1k2l`,
+  budget $0.00001, cache off). Preserve these values.
+- Header `x-prism-provider` format is `alpha/alpha-small`. Cache hits cost `0`. On streaming,
+  cost header is not required but final cost must still be logged and in the usage API.
+- Every data-plane request is logged, including rejections: request_id, virtual_key,
+  requested_model, resolved_provider/model, status, tokens, cost, cache, fallback,
+  route_reason, retries, latency_ms, created_at.
+- Cost precision: store cost as integer nano-USD (price per 1M tokens x 1000 = nano-USD per
+  token, exact for the table's prices), print the header with enough decimals, and make the
+  usage API sum the same stored values so the load test reconciles exactly.
+- Budget rule (documented overshoot is allowed): admit while spent < budget, add actual
+  cost after; in-flight requests may overshoot by their own cost. Reset: calendar month,
+  reset-on-read.
+- Rate limiter: in-memory is allowed but must be race-safe (no await between check and
+  record, or a lock).
+- Streaming: if a provider dies mid-stream, end the client stream with an error event; never
+  splice another provider's output. Cache + streaming: replay as one SSE chunk or skip cache;
+  document it.
+- Router: `data/routing_eval.jsonl` has 20 cases; never use `expected_tier` in routing logic;
+  length-only scores ~60%; 80%+ with a documented method is a solid baseline; log
+  route_reason. Mocks cannot classify, so use heuristics, embeddings, or a local model.
+- Cache: per key, matcher must hit the paraphrase pairs (a1/a2, b1/b2) and miss a3
+  (password vs 2FA reset). Smoke and load tests prepend a random salt like `(abc123)` to
+  prompts, so check how the matcher treats the salt and what that does to load-test hits.
+- Verification: smoke test must pass; load test with `--rpm-limit 10` on the free-tier key
+  must show zero over-admission; report routing accuracy, cache behavior on the sample pairs,
+  added latency, and known limitations.
 
 (Update this section at the end of each work session.)
 
