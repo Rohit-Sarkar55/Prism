@@ -13,7 +13,8 @@ import aiosqlite
 
 from app.money import nano_to_usd_str
 
-SERVED = ("ok", "cache_hit")  # statuses that consumed (or replayed) a completion
+# Statuses that reached a provider (or the cache) and delivered output. Only these count in usage.
+SERVED = ("ok", "cache_hit", "stream_error", "client_disconnect")
 
 
 @dataclass
@@ -142,7 +143,7 @@ class Store:
                    COALESCE(SUM(cost_nano), 0) AS cost_nano,
                    COALESCE(SUM(status = 'cache_hit'), 0) AS cache_hits
             FROM request_logs
-            WHERE virtual_key = ? AND status IN (?, ?) AND created_at >= ? AND created_at < ?
+            WHERE virtual_key = ? AND status IN (?, ?, ?, ?) AND created_at >= ? AND created_at < ?
             """,
             (virtual_key, *SERVED, _iso(start), _iso(end)),
         )

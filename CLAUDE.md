@@ -136,7 +136,7 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
   a timeout on every call, and an in-process fake for unit tests.
 - [x] **Phase 2: Core API, auth, headers (~1 day).** (non-streaming done, see status) Non-streaming `/v1/chat/completions`,
   virtual-key auth, alias resolution, four headers, cost from price table.
-- [ ] **Phase 3: Streaming (~1 day).** Chunk pass-through, `data: [DONE]`, usage recorded in
+- [x] **Phase 3: Streaming (~1 day).** (code written and verified live, see status) Chunk pass-through, `data: [DONE]`, usage recorded in
   a `finally` block (including client disconnect).
 - [ ] **Phase 4: Allowlist, rate limits, budgets (~2 days).** Distinct errors, atomic
   enforcement. Done when a 50+ parallel request test shows zero over-admission and totals
@@ -154,25 +154,49 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 
 ## Current status
 
-- Phases 0 and 1 DONE and pushed (setup, schema, seed loader, provider adapter + fake +
-  registry, mock integration tests).
-- Phase 2 DONE in code (verify tests + push): non-streaming `POST /v1/chat/completions`.
-  New: `app/costs.py` (nano-USD cost from provider usage), `app/errors.py` (`GatewayError`,
-  one error shape), `app/headers.py` (x-prism-* contract, also on errors), `app/routing.py`
-  (alias/model resolution; `route_auto` is a PLACEHOLDER until Phase 6), `app/upstream.py`
-  (single attempt on the primary; Phase 5 adds retries + failover), `app/store.py` (keys,
-  logs, usage; served request = log row + usage increment in ONE transaction under a lock),
-  `app/routes/chat.py` (data plane), `app/routes/admin.py` (`GET /admin/usage`,
-  `GET /admin/logs`, demo admin token). Schema gained `request_logs.upstream_ms` with a tiny
-  `ALTER TABLE` migration, so an older prism.db keeps working.
-- Verified live: provided `smoke_test.py` section [1] passes (200, choices/usage, headers,
-  first request is a miss). Streaming returns 501 until Phase 3, so the script fails at
-  [2] and crashes there (it parses the 501 error body as a stream); that is expected.
-  Auth, allowlist, unknown-model and upstream-down responses all verified by hand.
-- Not yet done: streaming (501 now), rate limit, budget, retries/failover, `auto` router,
-  semantic cache, console, README, verification report.
-- Next: Phase 3, streaming pass-through. Cost for streams comes from the final chunk's usage
-  and is logged after the stream ends (in a `finally`, including client disconnect).
+- Phases 0, 1, 2 DONE and pushed (73 tests passing on Windows): setup, schema, seed loader,
+  provider adapter + fake + registry, non-streaming chat endpoint, auth, headers, cost
+  metering, request logs, admin usage/logs.
+- Phase 3 DONE in code (verify tests + push): streaming pass-through. New `app/streaming.py`
+  (`sse_stream`), `open_stream` in `app/upstream.py`, streaming branch in `app/routes/chat.py`
+  (refactored around a `RequestContext`). `FakeAdapter` gained `chunk_delay_s`, `emitted`,
+  `stream_closed`, `stream_usage`. 84 tests pass in the sandbox.
+- Verified live against the real mocks: provided `smoke_test.py` sections [1] to [4] all PASS
+  (non-streaming, streaming, auth, unknown model) and [7]. Sections [5] and [6] FAIL because
+  there is no cache yet (Phase 7). Chunks reach the client ~20 ms apart (the mock's pacing),
+  so nothing is buffered. A client that hangs up mid-stream is logged as `client_disconnect`.
+- Not yet done: rate limit, budget (Phase 4), retries/failover (Phase 5), `auto` router
+  (Phase 6, placeholder now), semantic cache (Phase 7), console (Phase 8), README, verification
+  report, demo video.
+- Next: Phase 4, the riskiest: model allowlist is done, add per-key requests-per-minute limit
+  (race-safe sliding window, no await between check and record) and monthly budget
+  (admit while spent < budget, add actual cost after; budget-demo key must pass once then get
+  `budget_exceeded`). Distinct errors: 429 `rate_limit_exceeded`, budget 429 or 402
+  `budget_exceeded`. Then run `scripts/load_test.py --key prism-sk-free-7g8h9i --requests 30
+  --concurrency 10 --rpm-limit 10` and require zero over-admission.
+
+### Phase 3 design decisions (feed the README)
+
+- The gateway connects upstream and waits for the FIRST chunk before sending any HTTP response.
+  A failure up to that point is a clean 502 JSON error (and can fail over in Phase 5). After the
+  first chunk the client has output, so there is no failover.
+- Provider dies mid-stream: HTTP status is already 200, so the stream ends with an
+  `error` event (`code: stream_interrupted`) and NO `data: [DONE]` ([DONE] means success).
+  The log status is `stream_error`. Never splice another provider's output.
+- The gateway writes its own `data: [DONE]`; the adapter swallows the upstream one.
+- `x-prism-cost-usd` is omitted on streams (headers go out before the cost is known; the API
+  contract allows it). Cost comes from the final chunk's `usage`, goes to the log and usage
+  API. The adapter requests `stream_options.include_usage` so real providers send it too.
+- Every stream is recorded exactly once in a `finally`, with the cleanup under
+  `anyio.CancelScope(shield=True)`: on client disconnect the request task is cancelled and an
+  unshielded await would raise, losing the accounting. A test cancels a task group to prove it.
+- Statuses that count in usage (SERVED): ok, cache_hit, stream_error, client_disconnect.
+- KNOWN LIMITATION: usage arrives only in the final chunk, so a client that disconnects early
+  is logged with 0 tokens and 0 cost although the provider did some work. A stream that ends
+  cleanly without provider usage is recorded at zero cost with a server-side warning.
+- Response sets `cache-control: no-cache` and `x-accel-buffering: no` (proxies must not buffer).
+- Cache + streaming (Phase 7 decision pending): either replay a cached answer as a single SSE
+  chunk plus [DONE], or skip the cache for streams. Document whichever is chosen.
 
 ### Phase 2 design decisions (feed the README)
 

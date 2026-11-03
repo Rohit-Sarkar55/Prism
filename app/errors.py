@@ -40,10 +40,6 @@ def model_not_allowed(model: str) -> GatewayError:
     )
 
 
-def not_implemented(message: str) -> GatewayError:
-    return GatewayError(501, "not_implemented_error", message, "rejected_unsupported")
-
-
 def upstream_failed() -> GatewayError:
     # Deliberately generic: upstream messages can describe our credentials or infrastructure.
     return GatewayError(502, "upstream_error", "The upstream provider failed to serve this request", "upstream_error")

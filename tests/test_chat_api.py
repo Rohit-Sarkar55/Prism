@@ -146,12 +146,6 @@ async def test_non_json_body_is_400(client):
     assert resp.status_code == 400
 
 
-async def test_streaming_is_explicitly_unsupported_for_now(client):
-    resp = await client.post("/v1/chat/completions", json={**BODY, "stream": True}, headers=auth(SEARCH))
-    assert resp.status_code == 501
-    assert resp.json()["error"]["type"] == "not_implemented_error"
-
-
 async def test_upstream_failure_is_502_with_no_provider_details_and_no_charge(client, fakes):
     fakes["alpha"].fail_times = 1
     resp = await client.post("/v1/chat/completions", json=BODY, headers=auth(SEARCH))

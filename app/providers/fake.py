@@ -24,6 +24,8 @@ class FakeAdapter:
         error: ProviderError | None = None,
         delay_s: float = 0.0,
         fail_stream_after: int | None = None,
+        chunk_delay_s: float = 0.0,
+        stream_usage: bool = True,
     ):
         self.name = name
         self.reply = reply
@@ -32,7 +34,11 @@ class FakeAdapter:
         self.error = error
         self.delay_s = delay_s
         self.fail_stream_after = fail_stream_after  # raise MidStreamError after N chunks
+        self.chunk_delay_s = chunk_delay_s  # pause before each streamed chunk
+        self.stream_usage = stream_usage  # False: the final chunk carries no usage
         self.calls: list[tuple[str, str]] = []  # (kind, model), for assertions
+        self.emitted = 0  # chunks handed to the consumer so far
+        self.stream_closed = False  # True once a stream generator has been closed or finished
 
     @property
     def usage(self) -> Usage:
@@ -63,11 +69,19 @@ class FakeAdapter:
 
     async def stream(self, model: str, messages: list[dict], **params: Any) -> AsyncIterator[StreamChunk]:
         await self._before("stream", model)
-        for i, word in enumerate(self.reply.split()):
-            if self.fail_stream_after is not None and i >= self.fail_stream_after:
-                raise MidStreamError(self.name, detail="fake mid-stream failure")
-            yield StreamChunk({"choices": [{"index": 0, "delta": {"content": word + " "}}]})
-        yield StreamChunk({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}, self.usage)
+        try:
+            for i, word in enumerate(self.reply.split()):
+                if self.fail_stream_after is not None and i >= self.fail_stream_after:
+                    raise MidStreamError(self.name, detail="fake mid-stream failure")
+                if self.chunk_delay_s:
+                    await asyncio.sleep(self.chunk_delay_s)
+                self.emitted += 1
+                yield StreamChunk({"choices": [{"index": 0, "delta": {"content": word + " "}}]})
+            self.emitted += 1
+            final = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+            yield StreamChunk(final, self.usage if self.stream_usage else None)
+        finally:
+            self.stream_closed = True
 
     async def aclose(self) -> None:
         return None
