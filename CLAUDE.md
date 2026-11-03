@@ -134,7 +134,7 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
   injection via `POST /admin/config` with mode ok/down/rate_limited, fail_rate, latency_ms).
   Do not rebuild them. Build the adapter interface (chat, stream) with httpx against them,
   a timeout on every call, and an in-process fake for unit tests.
-- [ ] **Phase 2: Core API, auth, headers (~1 day).** Non-streaming `/v1/chat/completions`,
+- [x] **Phase 2: Core API, auth, headers (~1 day).** (non-streaming done, see status) Non-streaming `/v1/chat/completions`,
   virtual-key auth, alias resolution, four headers, cost from price table.
 - [ ] **Phase 3: Streaming (~1 day).** Chunk pass-through, `data: [DONE]`, usage recorded in
   a `finally` block (including client disconnect).
@@ -154,20 +154,47 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 
 ## Current status
 
-- Phase 0 DONE and pushed: setup, pack data in `data/ docs/ scripts/`, SQLite schema
-  (`app/db.py`), nano-USD money helpers (`app/money.py`), seed loader (`app/seed.py`),
-  settings (`app/config.py`).
-- Phase 1 DONE (verify push): `app/providers/` has `base.py` (contract: `ProviderAdapter`,
-  `ChatResult`, `StreamChunk`, `Usage`, `ProviderError`, `MidStreamError`),
-  `openai_compat.py` (httpx adapter, timeouts, error classification, stream parsing),
-  `fake.py` (scriptable in-process fake for tests), `registry.py` (builds adapters from
-  config, `provider_for(model)`). `app/main.py` builds the registry at startup. 43 tests pass,
-  including `tests/test_mock_integration.py` which runs the real `scripts/mock_provider.py`.
-- `ruff.toml` excludes `scripts/` (provided files). Ruff 0.17 default rules are broad, so
-  keep async tests free of blocking calls (use `httpx.AsyncClient` in async tests).
-- Next: Phase 2, core API: `POST /v1/chat/completions` (non-streaming), virtual-key auth,
-  alias resolution via the registry, the four `x-prism-*` headers, cost from the price
-  table (integer nano-USD), request logging. Run on port 8080 and run `scripts/smoke_test.py`.
+- Phases 0 and 1 DONE and pushed (setup, schema, seed loader, provider adapter + fake +
+  registry, mock integration tests).
+- Phase 2 DONE in code (verify tests + push): non-streaming `POST /v1/chat/completions`.
+  New: `app/costs.py` (nano-USD cost from provider usage), `app/errors.py` (`GatewayError`,
+  one error shape), `app/headers.py` (x-prism-* contract, also on errors), `app/routing.py`
+  (alias/model resolution; `route_auto` is a PLACEHOLDER until Phase 6), `app/upstream.py`
+  (single attempt on the primary; Phase 5 adds retries + failover), `app/store.py` (keys,
+  logs, usage; served request = log row + usage increment in ONE transaction under a lock),
+  `app/routes/chat.py` (data plane), `app/routes/admin.py` (`GET /admin/usage`,
+  `GET /admin/logs`, demo admin token). Schema gained `request_logs.upstream_ms` with a tiny
+  `ALTER TABLE` migration, so an older prism.db keeps working.
+- Verified live: provided `smoke_test.py` section [1] passes (200, choices/usage, headers,
+  first request is a miss). Streaming returns 501 until Phase 3, so the script fails at
+  [2] and crashes there (it parses the 501 error body as a stream); that is expected.
+  Auth, allowlist, unknown-model and upstream-down responses all verified by hand.
+- Not yet done: streaming (501 now), rate limit, budget, retries/failover, `auto` router,
+  semantic cache, console, README, verification report.
+- Next: Phase 3, streaming pass-through. Cost for streams comes from the final chunk's usage
+  and is logged after the stream ends (in a `finally`, including client disconnect).
+
+### Phase 2 design decisions (feed the README)
+
+- Check order: authenticate (401) -> validate body (400) -> resolve model (404) -> allowlist
+  (403) -> [Phase 4: rate limit (429), then budget] -> [Phase 7: cache] -> upstream.
+- 404 comes before 403 so a typo is reported as "unknown model", not "not allowed".
+- Concrete model names (e.g. `alpha-small`) resolve too, but the allowlist is checked against
+  the name as sent, so a key allowed only `fast` cannot call `alpha-small` directly.
+- `usage.requests` counts SERVED requests (status ok or cache_hit); rejections and upstream
+  failures are in the log but not in usage totals.
+- Usage API aggregates from request_logs (arbitrary date windows, admin path). Budget checks
+  will read `usage_monthly` (cheap, hot path). Both are written in one transaction, so they
+  reconcile; a test asserts it.
+- Cost is integer nano-USD end to end. Header `x-prism-cost-usd` prints 9 decimals ("0" when
+  zero). The usage API returns `cost_usd` (float) and exact `cost_nano` (int).
+- Only temperature, top_p, max_tokens, stop, seed, presence/frequency_penalty are forwarded
+  upstream; other body fields are dropped.
+- Error bodies never include upstream messages (they can describe our credentials); the
+  detail goes to server logs only.
+- Failure to log a REJECTION is swallowed (logged to the server log) so the caller still gets
+  the real error; failure to record a SERVED request propagates as a 500 (never silently
+  under-count).
 
 ### Phase 1 design decisions (feed the README)
 

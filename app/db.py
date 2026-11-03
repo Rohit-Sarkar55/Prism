@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS request_logs (
     fallback          INTEGER NOT NULL DEFAULT 0,
     route_reason      TEXT,
     retries           INTEGER NOT NULL DEFAULT 0,
-    latency_ms        INTEGER,
+    latency_ms        INTEGER,                  -- total time inside the gateway
+    upstream_ms       INTEGER,                  -- time spent waiting on the provider
     created_at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_logs_key_time ON request_logs (virtual_key, created_at DESC);
@@ -71,6 +72,14 @@ async def open_db(path: Path | str) -> aiosqlite.Connection:
     return db
 
 
+async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, ddl: str) -> None:
+    """Tiny migration: add a column to a table created by an older version of the schema."""
+    cur = await db.execute(f"PRAGMA table_info({table})")
+    if column not in {row["name"] for row in await cur.fetchall()}:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 async def init_schema(db: aiosqlite.Connection) -> None:
     await db.executescript(SCHEMA)
+    await _ensure_column(db, "request_logs", "upstream_ms", "INTEGER")
     await db.commit()

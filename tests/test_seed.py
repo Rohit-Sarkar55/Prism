@@ -78,3 +78,15 @@ async def test_reseeding_is_idempotent_and_keeps_usage(db):
 async def test_wal_mode_is_enabled(db):
     cur = await db.execute("PRAGMA journal_mode")
     assert (await cur.fetchone())[0] == "wal"
+
+
+async def test_init_schema_adds_missing_column_to_an_older_database(db):
+    import sqlite3
+
+    if sqlite3.sqlite_version_info < (3, 35):
+        pytest.skip("DROP COLUMN needs SQLite 3.35+")
+    await db.execute("ALTER TABLE request_logs DROP COLUMN upstream_ms")
+    await db.commit()
+    await init_schema(db)  # a restart on an old prism.db must not break logging
+    cur = await db.execute("PRAGMA table_info(request_logs)")
+    assert "upstream_ms" in {row["name"] for row in await cur.fetchall()}
