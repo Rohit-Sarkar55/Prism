@@ -74,7 +74,8 @@ hit on a paraphrased prompt, live provider failover).
 
 - Python 3.11+, FastAPI, uvicorn, httpx, pydantic-settings, aiosqlite, numpy.
 - SQLite in WAL mode as the persistent store (can move to Postgres later).
-- Dev tools: pytest, pytest-asyncio, ruff.
+- Dev tools: pytest, pytest-asyncio, ruff, httpx2 (silences Starlette's TestClient
+  deprecation warning; runtime provider calls still use `httpx`).
 - httpx for provider calls (per-call timeouts, streaming without buffering).
 - numpy cosine similarity for the semantic cache.
 - Embedding approach is undecided. Leaning toward `fastembed` (small local ONNX model, no
@@ -84,11 +85,26 @@ hit on a paraphrased prompt, live provider failover).
 
 Install:
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
-pip install -r requirements-dev.txt
-uvicorn app.main:app --reload
+python -m venv .venv
+source .venv/bin/activate        # PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+python -m uvicorn app.main:app --reload
 ```
+
+## Environment notes
+
+- OS: Windows. Python 3.14.7. Terminals in use: PowerShell and Git Bash.
+- The project root is the inner `Prism/` folder (it contains `app/`, `tests/`,
+  `requirements.txt`). Run all project commands from there with the venv active.
+- Use `python -m uvicorn ...` and `python -m pip ...` so the venv's tools are always used.
+- Regenerate the lock file with `python -m pip freeze > requirements.lock.txt` in Git Bash,
+  or `python -m pip freeze | Out-File -Encoding utf8 requirements.lock.txt` in PowerShell.
+  Plain `>` in Windows PowerShell writes UTF-16 (file size roughly doubles). A correct
+  file is about 670 bytes with the current dependencies.
+- `pytest.ini` sets `asyncio_mode = auto`, so async tests need no decorator.
+- In PowerShell, use `Invoke-RestMethod` instead of `curl`.
+- Git pushes over HTTPS need a GitHub personal access token or browser sign-in (account
+  passwords are rejected). Never commit tokens or write them in this file.
 
 ## Suggested layout
 
@@ -109,9 +125,10 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 
 ## Plan (rough estimates for focused full-time work)
 
-- [ ] **Phase 0: Setup and data (~0.5 day).** Repo, venv, deps, README skeleton. Inspect the
-  three data files, design tables (keys, usage, request logs, cache entries), write the
-  loader. Done when: startup loads everything and seed keys are queryable.
+- [ ] **Phase 0: Setup and data (~0.5 day).** Setup half done (see status). Remaining:
+  README skeleton, inspect the three data files, design tables (keys, usage, request logs,
+  cache entries), write the loader. Done when: startup loads everything and seed keys are
+  queryable.
 - [ ] **Phase 1: Provider adapter and mocks (~1 day).** Adapter interface for chat and
   streaming. Two mocks that can inject latency, 429, 500 or go down. Timeout on every call.
 - [ ] **Phase 2: Core API, auth, headers (~1 day).** Non-streaming `/v1/chat/completions`,
@@ -134,12 +151,21 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 
 ## Current status
 
-- Phase 0 in progress.
-- Done: repo created, `.venv` created, `requirements.txt`, `requirements-dev.txt` and
-  `requirements.lock.txt` written.
-- Next: add a root `.gitignore` (`.venv/`, `__pycache__/`, `*.db`, `*.db-wal`, `*.db-shm`,
-  `.env`, `.pytest_cache/`, `.ruff_cache/`), add a minimal `/health` endpoint in
-  `app/main.py` to verify setup, then inspect the three data files and design the schema.
+- Phase 0, setup half: DONE. `.venv` works, all dependencies installed, `.gitignore` at the
+  repo root, `app/main.py` serves `GET /health` (returns `{"status": "ok"}`),
+  `tests/test_health.py` passes (`1 passed`, no warnings), `pytest.ini` configured.
+- First commit made locally ("Phase 0: venv, dependencies, health endpoint, first test").
+  The push was failing with an authentication error; fix by using a fine-grained personal
+  access token (Contents: read and write on this repo) or `gh auth login`, then `git push`.
+  Confirm the push landed before starting the next step.
+- Provided data files (`model_pricing.json`, `seed_keys.json`, `gateway_config.sample.json`)
+  and scripts (`scripts/smoke_test.py`, `scripts/load_test.py`) are NOT in the repo yet.
+  Get them from the course material or `airtribe-projects/prism-capstone`, put data files in
+  `data/` and scripts in `scripts/`.
+- Next: read the real data files and scripts, then design the SQLite schema (keys, usage,
+  request logs, cache entries) and write the loader. Check the proposed error codes and alias
+  names against what the files and scripts actually use, and fix anything in this file that
+  turns out to be wrong.
 
 (Update this section at the end of each work session.)
 
