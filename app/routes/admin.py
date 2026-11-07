@@ -58,3 +58,15 @@ async def usage(request: Request, key: str, from_: str | None = Query(None, alia
 async def logs(request: Request, key: str | None = None, limit: int = Query(50, ge=1, le=500)):
     require_admin(request)
     return {"logs": await request.app.state.store.recent_logs(key, limit)}
+
+
+@router.get("/providers")
+async def providers(request: Request):
+    require_admin(request)
+    health = request.app.state.health.snapshot()
+    names = request.app.state.providers.adapters
+    return {
+        "providers": {
+            name: health.get(name, {"state": "healthy", "recent_calls": 0, "recent_error_rate": 0.0}) for name in names
+        }
+    }

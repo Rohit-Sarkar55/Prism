@@ -42,7 +42,7 @@ class OpenAICompatAdapter:
         # Every call has a timeout. For a stream, `read` bounds the gap between chunks, so a
         # provider that goes silent mid-stream is cut off too.
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_s, connect=min(timeout_s, 2.0)), transport=transport
+            timeout=httpx.Timeout(timeout_s, connect=min(timeout_s, 1.0)), transport=transport
         )
 
     async def aclose(self) -> None:

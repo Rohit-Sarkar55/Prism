@@ -7,10 +7,11 @@ import anyio
 import anyio.lowlevel
 import pytest
 
+from app.health import ProviderHealth
 from app.providers import ProviderRegistry, Usage
 from app.providers.fake import FakeAdapter
 from app.streaming import sse_stream
-from app.upstream import open_stream
+from app.upstream import RetryPolicy, Upstream
 
 SEARCH = "prism-sk-search-1a2b3c"
 ADMIN = {"Authorization": "Bearer demo-admin-token"}
@@ -77,7 +78,7 @@ async def test_streamed_and_non_streamed_requests_cost_the_same(client):
 
 
 async def test_failure_before_the_first_chunk_is_a_clean_502_not_a_stream(client, fakes):
-    fakes["alpha"].fail_times = 1
+    fakes["alpha"].fail_times = fakes["beta"].fail_times = 99  # every provider in the chain is down
     resp = await client.post("/v1/chat/completions", json=STREAM_BODY, headers=auth())
     assert resp.status_code == 502
     assert resp.json()["error"]["type"] == "upstream_error"
@@ -136,9 +137,8 @@ class Recorder:
 
 
 async def opened_stream(fake):
-    return await open_stream(
-        ProviderRegistry({"alpha": fake}), ["alpha-small"], [{"role": "user", "content": "hi"}], {}
-    )
+    upstream = Upstream(ProviderRegistry({"alpha": fake}), ProviderHealth(), RetryPolicy())
+    return await upstream.open_stream(["alpha-small"], [{"role": "user", "content": "hi"}], {})
 
 
 async def test_first_event_is_forwarded_before_the_upstream_finishes():

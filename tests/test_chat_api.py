@@ -130,7 +130,7 @@ async def test_non_json_body_is_400(client):
 
 
 async def test_upstream_failure_is_502_with_no_provider_details_and_no_charge(client, fakes):
-    fakes["alpha"].fail_times = 1
+    fakes["alpha"].fail_times = fakes["beta"].fail_times = 99  # every provider in the chain is down
     resp = await client.post("/v1/chat/completions", json=BODY, headers=auth(SEARCH))
     assert resp.status_code == 502
     assert resp.json()["error"]["type"] == "upstream_error"

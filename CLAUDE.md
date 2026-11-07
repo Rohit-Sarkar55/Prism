@@ -141,9 +141,9 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 - [x] **Phase 4: Allowlist, rate limits, budgets (~2 days).** (done, load test passes live) Distinct errors, atomic
   enforcement. Done when a 50+ parallel request test shows zero over-admission and totals
   match the log. Riskiest phase: write tests first.
-- [ ] **Phase 5: Routing, retries, failover (~1.5 days).** Fallback chain, backoff with
+- [x] **Phase 5: Routing, retries, failover (~1.5 days).** (done, drilled live) Fallback chain, backoff with
   jitter, no retry on permanent 4xx (except 429), fallback flag in header and log.
-- [ ] **Phase 6: Smart routing `auto` (~2 days).** Difficulty scorer (not length-based),
+- [x] **Phase 6: Smart routing `auto` (~2 days).** (done, see status for honest numbers) Difficulty scorer (not length-based),
   length-only baseline, one-command eval with per-case accuracy.
 - [ ] **Phase 7: Semantic cache (~1.5 days).** Embeddings, cosine threshold, per-key (and
   per-model) scoping, tuned on paraphrase pairs, hit rate tracking.
@@ -154,32 +154,102 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 
 ## Current status
 
-- Phases 0 to 3 DONE and pushed (84 tests on Windows): setup, schema, seed loader, provider
-  adapter, chat endpoint, auth, headers, cost metering, logs, admin usage/logs, streaming.
-- Phase 4 DONE in code (verify tests + push): per-key rate limit and monthly budget. New
-  `app/ratelimit.py` (`SlidingWindowLimiter`), `rate_limited` and `budget_exhausted` in
-  `app/errors.py`, `Store.month_spent_nano`, `format_usd` in `app/money.py`, enforcement in
-  `app/routes/chat.py`. Shared test fixtures (`fakes`, `client`) moved to `tests/conftest.py`.
-  102 tests pass in the sandbox.
-- Verified live against the real mocks: provided `scripts/load_test.py --key prism-sk-free-7g8h9i
-  --requests 30 --concurrency 10 --rpm-limit 10` reports 10 accepted, 20 rate limited, "Over-admission
-  check OK". Client totals match the usage API exactly (120 prompt, 267 completion tokens,
-  cost 178200 nano = 0.0001782 USD; the script prints the cost rounded to 6 decimals).
-  Budget-demo key: first request 200, second 402 `budget_exceeded`, both logged.
-- Provided `smoke_test.py`: sections [1] to [4] and [7] pass; [5] and [6] fail until the cache
-  exists (Phase 7).
-- Not yet done: retries/failover (Phase 5; a down provider is a 502 now), `auto` router (Phase 6,
-  placeholder), semantic cache (Phase 7), console (Phase 8), README, verification report,
-  demo video.
-- Next: Phase 5, retries with exponential backoff + jitter, then failover down the alias chain,
-  `x-prism-fallback: true`, fallback and retry count in the log. Config has
-  `retry: {max_attempts: 3, initial_backoff_ms: 200, backoff_multiplier: 2}` and a suggested
-  `degradation` block. Replace the single attempt in `app/upstream.py` (`call_upstream` and
-  `open_stream`); keep their signatures. Decide: retry only transient `ProviderError`s, fail over
-  on any ProviderError except for permanent client errors that are the caller's fault (to decide
-  and document), never fail over after the first streamed chunk. Demo drill: alpha `down` ->
-  beta serves with fallback true; alpha `latency_ms: 3000` -> timeout then fallback; alpha
-  `fail_rate: 0.3` -> retries absorb it; restore alpha -> primary serves again immediately.
+- Phases 0 to 4 DONE and pushed. Phase 5 (retries, failover, circuit breaker; 146 tests) was
+  delivered; confirm it is added and pushed. Provided load test passes on the user's machine
+  (10 accepted of limit 10; usage API matches the client totals exactly: 120 prompt, 259
+  completion tokens, 173400 nano-USD).
+- Phase 6 DONE in code (verify tests + push): the `auto` router. New `app/difficulty.py`
+  (`classify`), `route_auto` in `app/routing.py` now calls it, `tools/routing_eval.py` (the
+  one-command eval: `python -m tools.routing_eval`, from the project root; needs `tools/__init__.py`),
+  `data/routing_holdout.jsonl` (40 prompts the project author wrote BEFORE the classifier),
+  `tests/test_difficulty.py`, `tests/test_auto_routing.py`. 186 tests pass in the sandbox.
+- Verified live: easy prompts served by alpha-small (about 0.00001 USD), hard ones by alpha-large
+  (about 0.0006 USD, 30 to 50x more), each with its `route_reason` in the request log.
+- HONEST NUMBERS (put these in the README and verification report exactly as stated):
+  * Provided set (20): router 20/20 = 100%; length-only baseline (given its best threshold, 46
+    chars) 15/20 = 75%; on the 8 trap cases baseline 5/8, router 8/8. CAVEAT: the author could
+    see this set's answer key while designing the rules, so 100% is optimistic.
+  * Held-out set (40), the better estimate: FIRST RUN, nothing tuned: router 33/40 = 82.5%,
+    baseline 26/40 = 65%. After two general fixes made because of what the first run exposed
+    (vocabulary alone must not reach the threshold; "summarize" is only easy when there is text
+    to summarize): 35/40 = 87.5%. That second number is NOT independent any more.
+  * The 5 remaining misses are all hard prompts sent to the cheap tier, with no keyword cues
+    (tricky word problem, logic puzzle, ethics argument, conceptual-depth question). They are
+    documented, not patched with prompt-specific regexes.
+- Not yet done: semantic cache (Phase 7), console (Phase 8), README, verification report, demo video.
+- Smoke test still shows [5] and [6] failing until the cache exists.
+- Next: Phase 7, the semantic cache. DECIDE and document: (a) embedding method (candidates:
+  `fastembed` small ONNX model, no PyTorch, best fit for real paraphrases; or a no-dependency
+  hashed word/char n-gram vector with numpy, weaker on true paraphrase); (b) similarity
+  threshold per key from `virtual_keys.cache_threshold` (search 0.92, free-tier 0.85, others off);
+  (c) scope entries by (virtual_key, model alias), NEVER across keys, with a test that proves a
+  second key never gets the first key's answer; (d) cache hit: `x-prism-cache: hit`,
+  `x-prism-cost-usd: 0`, log status `cache_hit` (counts in usage requests and cache_hits, cost 0),
+  fallback false, provider header documented (e.g. `cache/hit` or the original provider);
+  (e) streaming + cache: replay a hit as one SSE chunk plus [DONE], or skip the cache for streams,
+  and document; (f) budget interplay: seed notes say budget-demo has the cache off so "a $0 cache
+  hit cannot mask the rejection"; decide whether a hit is served when the budget is exhausted;
+  (g) THE TRAP: smoke and load tests prepend a random salt like "(abc123)" to prompts; the load
+  test uses cache-busting salts on the free-tier key which has the cache ON at 0.85, so make sure
+  the matcher does not turn salted-but-different prompts into hits and break the load test's
+  accounting; the paraphrase pairs (a1/a2, b1/b2) MUST hit and the near-miss a3 (password reset vs
+  two-factor reset) MUST NOT. Only cache successful, non-streamed-error responses; never cache
+  the response for a request that was rejected.
+
+### Phase 6 design decisions (feed the README)
+
+- Why rules, not a model: the router runs on every `auto` request, so it must be fast, free,
+  deterministic and explainable (the reason string is logged per request). The mocks cannot
+  classify anyway.
+- Difficulty is a property of what the prompt ASKS FOR, not its length. Step 1 separates the
+  instruction from payload: quoted spans and long or data-like sentences (pasted logs, rosters,
+  emails) are ignored, so a long input with a trivial question stays trivial and jargon inside
+  pasted data does not count. Step 2 scores the instruction with weighted signals.
+- Hard signals (+): proofs/derivations (+3), reasoning requested, estimation, comparison,
+  recommendation, causal "why"/mechanism, diagnosis, design/planning, algorithmic, non-trivial
+  code, multi-part demands, a long multi-clause instruction, systems vocabulary (capped at +1.5 in
+  total so jargon alone never decides). Easy signals (-): lookups, conversion/translation,
+  extraction, light rewriting, summarising provided text, short-output requests, yes/no about a
+  specific number.
+- Decision: score >= 2.0 is `complex` (smart tier), else `simple` (fast tier). The bias is
+  deliberate: below the threshold, pick the cheap tier.
+- Only the LAST user message is judged; system prompts and earlier turns are ignored.
+- A static test fails if the router source mentions the answer key or the eval files.
+- Honesty process: held-out set written first; first-run numbers recorded; later tuning disclosed.
+- Known limits: English only; keyword cues, so hard prompts without cues are missed (those errors
+  cost quality, not money); no learning from outcomes. Next steps if time: a second-stage LLM
+  judge on the fast model for scores near the threshold (cached), or a classifier trained on
+  production logs with human labels.
+
+### Phase 5 design decisions (feed the README)
+
+- Chain: primary then fallbacks from the alias; a model maps to its provider via the registry.
+- RETRY the same provider (exponential backoff 200 ms x2, +-25% jitter, max 3 attempts, from
+  config `retry`) only for `server_error` (5xx) and `network` blips.
+- FAIL OVER immediately, no retry, for `connect`, `timeout`, `rate_limited` (429) and
+  `malformed_response`: retrying a dead, slow or rate-limiting endpoint only burns the caller's time.
+- `client_error`: HTTP 400/413/422 means our request is bad, so STOP (another provider would
+  fail the same way and cost quota); 401/403/404 are provider-side config problems, so fail over.
+- One overall deadline (`PRISM_UPSTREAM_DEADLINE_S`, default 10 s) bounds retries plus failover;
+  each attempt also has its own timeout (`PRISM_PROVIDER_TIMEOUT_S`, default 2 s; connect 1 s).
+- `x-prism-fallback: true` only when a model other than the primary served it; the log row has
+  `fallback`, `resolved_provider/model` (the one that SERVED it, and cost is priced as that model)
+  and `retries` = total upstream attempts minus one, failovers included. A total failure is a
+  generic 502 `upstream_error` (never provider details) and still records `retries`.
+- Circuit breaker (the config's `degradation` block): a provider is degraded when it has 5
+  consecutive failures (hard down) OR at least 10 recent calls with error rate >= 0.5 (window 60 s).
+  Degraded providers are skipped unless they are the last model in the chain. One probe request
+  is allowed per 5 s; a successful probe closes the circuit at once, so recovery takes seconds.
+  The sample minimum stops a 30%-flaky provider tripping by chance (an earlier version with a
+  4-sample minimum wrongly wrote off a flaky provider; the drill caught it).
+  `p95_latency_ms` from the suggested config is NOT used: timeouts already count as failures.
+- Health is per process, in memory (like the rate limiter).
+- Streams use the same walk but only until the FIRST chunk (`open_stream`); after that, failure
+  ends the stream with an error event (see Phase 3).
+- Windows note: a dead port makes the connect attempt time out (about the 1 s connect timeout)
+  instead of failing instantly, so killing a provider process costs ~1 s per request until
+  the breaker trips (5 consecutive failures). `down` mode (503) is instant. For the demo video,
+  use `{"mode": "down"}` for an instant failover, and mention this if killing the process.
 
 ### Phase 4 design decisions (feed the README)
 

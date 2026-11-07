@@ -8,7 +8,7 @@ Order of checks, documented because the brief asks for it:
   5. requests-per-minute limit             -> 429 rate_limit_exceeded (with Retry-After)
   6. monthly budget (spent < budget)       -> 402 budget_exceeded
   7. (Phase 7) semantic cache
-  8. upstream call with timeout (retries and failover in Phase 5)
+  8. upstream call: timeout per attempt, retries with backoff, failover down the chain (upstream.py)
 Every request is logged, including every rejection.
 """
 
@@ -36,7 +36,6 @@ from app.providers import Usage
 from app.routing import Route, resolve_route
 from app.store import KeyRecord, LogEntry, Store
 from app.streaming import sse_stream
-from app.upstream import call_upstream, open_stream
 
 logger = logging.getLogger("prism.chat")
 router = APIRouter()
@@ -95,6 +94,7 @@ class RequestContext:
             err.log_status,
             virtual_key=self.virtual_key,
             requested_model=self.requested_model,
+            retries=err.retries,
             latency_ms=self.elapsed_ms(),
         )
 
@@ -142,9 +142,9 @@ async def chat_completions(request: Request):
         streaming = bool(body.get("stream"))
         upstream_started = time.monotonic()
         if streaming:
-            opened = await open_stream(state.providers, ctx.route.chain, body["messages"], params)
+            opened = await state.upstream.open_stream(ctx.route.chain, body["messages"], params)
         else:
-            outcome = await call_upstream(state.providers, ctx.route.chain, body["messages"], params)
+            outcome = await state.upstream.chat(ctx.route.chain, body["messages"], params)
     except GatewayError as err:
         try:
             await store.log_request(ctx.rejected(err))

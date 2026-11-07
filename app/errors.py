@@ -16,6 +16,7 @@ class GatewayError(Exception):
     def __init__(self, status: int, type_: str, message: str, log_status: str, headers: dict[str, str] | None = None):
         super().__init__(message)
         self.headers = headers or {}
+        self.retries = 0  # upstream attempts made before giving up (only set for upstream failures)
         self.status = status
         self.type = type_
         self.message = message
@@ -65,9 +66,11 @@ def budget_exhausted(budget_nano: int) -> GatewayError:
     )
 
 
-def upstream_failed() -> GatewayError:
+def upstream_failed(retries: int = 0) -> GatewayError:
     # Deliberately generic: upstream messages can describe our credentials or infrastructure.
-    return GatewayError(502, "upstream_error", "The upstream provider failed to serve this request", "upstream_error")
+    err = GatewayError(502, "upstream_error", "The upstream provider failed to serve this request", "upstream_error")
+    err.retries = retries
+    return err
 
 
 def error_response(err: GatewayError, request_id: str | None = None) -> JSONResponse:

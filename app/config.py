@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     # Upstream timeout (seconds). Low on purpose so the demo's 3s "slow provider" trips it;
     # real providers usually need a higher value.
     provider_timeout_s: float = 2.0
+    # Upper bound for retries plus failover on one request.
+    upstream_deadline_s: float = 10.0
 
 
 def get_settings() -> Settings:
