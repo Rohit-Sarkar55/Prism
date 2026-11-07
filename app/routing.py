@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from app.difficulty import classify
 from app.errors import not_found
 
 
@@ -14,9 +15,10 @@ class Route:
 
 
 def route_auto(config: dict, messages: list[dict]) -> tuple[str, str]:
-    """PLACEHOLDER until Phase 6: always picks the simple tier and says so in the log."""
+    """Classify the prompt's difficulty and return (alias, reason) for the matching tier."""
+    result = classify(messages)
     tiers = config["model_aliases"]["auto"]["route_by_difficulty"]
-    return tiers["simple"], "auto router not implemented yet; defaulted to the simple tier"
+    return tiers[result.tier], result.reason
 
 
 def resolve_route(config: dict, pricing: dict, requested: str, messages: list[dict]) -> Route:

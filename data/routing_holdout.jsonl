@@ -1,0 +1,40 @@
+{"id": "hold_001", "expected_tier": "fast", "note": "short, easy naming", "prompt": "Give me three names for a coffee shop."}
+{"id": "hold_002", "expected_tier": "fast", "note": "short, easy fact", "prompt": "What is the boiling point of water in Fahrenheit?"}
+{"id": "hold_003", "expected_tier": "fast", "note": "easy fix", "prompt": "Fix the typo in this sentence: 'The qick brown fox jumps over the lazy dog.'"}
+{"id": "hold_004", "expected_tier": "fast", "note": "easy summary of provided text", "prompt": "Summarize the following in one sentence: 'The city council met on Tuesday to discuss the new bike lanes. After two hours of debate, members voted 5-4 to approve funding for the first phase, which will cover Main Street and Oak Avenue.'"}
+{"id": "hold_005", "expected_tier": "fast", "note": "trivial code", "prompt": "Write a Python function that reverses a string."}
+{"id": "hold_006", "expected_tier": "fast", "note": "common knowledge comparison", "prompt": "What's the difference between a list and a tuple in Python?"}
+{"id": "hold_007", "expected_tier": "fast", "note": "short, easy list", "prompt": "List the days of the week in French."}
+{"id": "hold_008", "expected_tier": "fast", "note": "trap: long input, trivial count", "prompt": "Here is the guest list for Saturday's party: Alice, Bob, Carmen, Dev, Elena, Farid, Grace, Hiro, Ines, Jamal, Kira, Leo, Mia, Noor, Omar, Priya, Quinn, Rosa, Sven, Tara. How many guests are coming?"}
+{"id": "hold_009", "expected_tier": "fast", "note": "trap: long technical-sounding context, trivial question", "prompt": "Notes from the infrastructure sync. The database migration is scheduled for next quarter. The latency regression in the checkout service is still being investigated. The team reached consensus on the rollout strategy. Replication lag on the reporting replica is within limits. Concurrency limits were raised for the batch workers. What time does the meeting start? It was mentioned as 10:30 in the first line of the invite."}
+{"id": "hold_010", "expected_tier": "fast", "note": "short, easy conversion", "prompt": "Convert 5 kilometers to miles."}
+{"id": "hold_011", "expected_tier": "fast", "note": "short, easy fact", "prompt": "What year did the Berlin Wall fall?"}
+{"id": "hold_012", "expected_tier": "fast", "note": "easy rewrite", "prompt": "Rewrite this sentence to be more formal: 'Hey, can you send me that report asap?'"}
+{"id": "hold_013", "expected_tier": "fast", "note": "easy translation", "prompt": "Translate 'where is the train station?' into German."}
+{"id": "hold_014", "expected_tier": "fast", "note": "trap: scary words, one-sentence output", "prompt": "Explain the plan for tomorrow's standup in one sentence."}
+{"id": "hold_015", "expected_tier": "fast", "note": "trap: scary words, extraction from text", "prompt": "Summarize the trade-offs mentioned in this paragraph: 'Option A is cheaper but slower; Option B costs more but ships faster.'"}
+{"id": "hold_016", "expected_tier": "fast", "note": "short, easy two-part fact", "prompt": "What is the capital of Australia, and what is its population?"}
+{"id": "hold_017", "expected_tier": "fast", "note": "short, easy arithmetic", "prompt": "Is 144 a perfect square?"}
+{"id": "hold_018", "expected_tier": "fast", "note": "creative, easy", "prompt": "Write a haiku about autumn rain."}
+{"id": "hold_019", "expected_tier": "fast", "note": "easy formatting", "prompt": "Format this date as ISO 8601: March 4th, 2026."}
+{"id": "hold_020", "expected_tier": "fast", "note": "popular debugging Q&A", "prompt": "Why does my React component re-render infinitely when I call setState inside useEffect without a dependency array?"}
+{"id": "hold_021", "expected_tier": "smart", "note": "trap: short but tricky reasoning", "prompt": "A bat and a ball cost $1.10 in total. The bat costs $1 more than the ball. How much does the ball cost? Explain why the intuitive answer is wrong."}
+{"id": "hold_022", "expected_tier": "smart", "note": "hard without technical keywords: ethics", "prompt": "Is it ethical for a self-driving car to prioritize its passengers over pedestrians? Argue both sides."}
+{"id": "hold_023", "expected_tier": "smart", "note": "history causal analysis", "prompt": "What were the main causes of the French Revolution, and how did they interact?"}
+{"id": "hold_024", "expected_tier": "smart", "note": "concurrency refactor", "prompt": "Refactor a payment service to remove a race condition between two concurrent refunds, and explain your approach."}
+{"id": "hold_025", "expected_tier": "smart", "note": "technology comparison", "prompt": "Compare PostgreSQL and MongoDB for a read-heavy analytics workload and recommend one."}
+{"id": "hold_026", "expected_tier": "smart", "note": "trap: short but hard derivation", "prompt": "Derive the closed-form expression for the sum of the first n squares."}
+{"id": "hold_027", "expected_tier": "smart", "note": "system design", "prompt": "Design an API rate-limiting strategy for a multi-tenant SaaS platform, covering burst handling, fairness, and abuse prevention."}
+{"id": "hold_028", "expected_tier": "smart", "note": "trap: short but needs a proof", "prompt": "Explain why the halting problem is undecidable, with a proof sketch."}
+{"id": "hold_029", "expected_tier": "smart", "note": "operational reasoning", "prompt": "How would you detect and mitigate a thundering herd problem after a cache flush in a large distributed system?"}
+{"id": "hold_030", "expected_tier": "smart", "note": "fermi estimation", "prompt": "Estimate the annual electricity consumption of all data centers in the world and state your assumptions."}
+{"id": "hold_031", "expected_tier": "smart", "note": "hard code with explanation", "prompt": "Write a recursive descent parser for arithmetic expressions with operator precedence and explain the grammar."}
+{"id": "hold_032", "expected_tier": "smart", "note": "hard without keywords: word problem", "prompt": "A train leaves Chicago at 3pm going 60 mph. Another leaves New York at 4pm going 80 mph on the same track toward Chicago, which is 790 miles from New York. At what time do they meet?"}
+{"id": "hold_033", "expected_tier": "smart", "note": "critical analysis", "prompt": "Critique the following argument for logical fallacies: 'Everyone I know uses this app, so it must be the best app.'"}
+{"id": "hold_034", "expected_tier": "smart", "note": "open-ended planning with constraints", "prompt": "Plan a three-day itinerary for Tokyo for a family with two young children and a limited budget."}
+{"id": "hold_035", "expected_tier": "smart", "note": "security trade-off", "prompt": "What are the security implications of storing JWTs in localStorage versus httpOnly cookies, and which would you choose?"}
+{"id": "hold_036", "expected_tier": "smart", "note": "trap: short but needs a proof", "prompt": "Prove by induction that 2^n > n^2 for all n >= 5."}
+{"id": "hold_037", "expected_tier": "smart", "note": "diagnostic reasoning", "prompt": "Our nightly ETL job started taking 3x longer last week though the data volume is unchanged. What could explain this, and how would you investigate?"}
+{"id": "hold_038", "expected_tier": "smart", "note": "conceptual depth", "prompt": "Explain the CAP theorem and how it applies to choosing between a CP and an AP database for a banking application."}
+{"id": "hold_039", "expected_tier": "smart", "note": "balanced synthesis", "prompt": "Summarize the main arguments for and against a universal basic income, and give your own recommendation."}
+{"id": "hold_040", "expected_tier": "smart", "note": "hard without keywords: puzzle", "prompt": "Three boxes are labeled apples, oranges, and mixed, but every label is wrong. You may draw one fruit from one box. How can you correctly relabel all the boxes?"}
