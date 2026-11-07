@@ -41,12 +41,13 @@ class LogEntry:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cost_nano: int = 0
-    cache: str = "miss"
+    cache: str = "bypass"  # hit | miss | bypass
     fallback: bool = False
     route_reason: str | None = None
     retries: int = 0
     latency_ms: int | None = None
     upstream_ms: int | None = None
+    cache_similarity: float | None = None
 
     def row(self) -> tuple:
         values = {f.name: getattr(self, f.name) for f in fields(self)}
@@ -97,8 +98,9 @@ class Store:
             await self.db.execute(f"INSERT INTO request_logs ({LOG_COLUMNS}) VALUES ({LOG_PLACEHOLDERS})", entry.row())
             await self.db.commit()
 
-    async def record_served(self, entry: LogEntry) -> None:
-        """Log a served request and add it to the key's monthly usage, atomically."""
+    async def record_served(self, entry: LogEntry, *, cache_entry_id: int | None = None) -> None:
+        """Log a served request and add it to the key's monthly usage, atomically. For a cache hit,
+        the entry's hit counter moves in the same transaction."""
         month = entry.created_at.strftime("%Y-%m")
         async with self._write_lock:
             try:
@@ -126,10 +128,116 @@ class Store:
                         int(entry.status == "cache_hit"),
                     ),
                 )
+                if cache_entry_id is not None:
+                    await self.db.execute(
+                        "UPDATE cache_entries SET hit_count = hit_count + 1, last_used_at = ? WHERE id = ?",
+                        (entry.created_at.isoformat(timespec="milliseconds"), cache_entry_id),
+                    )
                 await self.db.commit()
             except Exception:
                 await self.db.rollback()
                 raise
+
+    # ---- cache entries (the matching logic lives in app/cache.py) -------------------------
+
+    async def load_cache_scope(self, virtual_key: str, model: str, scope_hash: str) -> list[dict]:
+        cur = await self.db.execute(
+            "SELECT id, embedding, created_at FROM cache_entries WHERE virtual_key = ? AND model = ? AND scope_hash = ?",
+            (virtual_key, model, scope_hash),
+        )
+        return [dict(row) for row in await cur.fetchall()]
+
+    async def get_cache_entry(self, entry_id: int) -> dict | None:
+        cur = await self.db.execute("SELECT * FROM cache_entries WHERE id = ?", (entry_id,))
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def insert_cache_entry(
+        self, virtual_key: str, model: str, scope_hash: str, prompt_text: str, embedding: str,
+        response_json: str, cost_nano: int, created_at: datetime,
+    ) -> int:  # fmt: skip
+        stamp = _iso(created_at)
+        async with self._write_lock:
+            cur = await self.db.execute(
+                """INSERT INTO cache_entries (virtual_key, model, scope_hash, prompt_text, embedding, response_json,
+                                              cost_nano, created_at, last_used_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    virtual_key,
+                    model,
+                    scope_hash,
+                    prompt_text,
+                    embedding.encode(),
+                    response_json,
+                    cost_nano,
+                    stamp,
+                    stamp,
+                ),
+            )
+            await self.db.commit()
+            return cur.lastrowid
+
+    async def refresh_cache_entry(self, entry_id: int, response_json: str, cost_nano: int, now: datetime) -> None:
+        async with self._write_lock:
+            await self.db.execute(
+                "UPDATE cache_entries SET response_json = ?, cost_nano = ?, created_at = ?, last_used_at = ? WHERE id = ?",
+                (response_json, cost_nano, _iso(now), _iso(now), entry_id),
+            )
+            await self.db.commit()
+
+    async def trim_cache(self, virtual_key: str, max_entries: int, expired_before: datetime) -> list[int]:
+        """Delete expired entries, then the least recently used ones beyond `max_entries`.
+        Returns the ids removed so the in-memory index can forget them."""
+        async with self._write_lock:
+            cur = await self.db.execute(
+                "SELECT id FROM cache_entries WHERE virtual_key = ? AND created_at < ?",
+                (virtual_key, _iso(expired_before)),
+            )
+            doomed = [row["id"] for row in await cur.fetchall()]
+            cur = await self.db.execute(
+                "SELECT id FROM cache_entries WHERE virtual_key = ? AND created_at >= ? "
+                "ORDER BY COALESCE(last_used_at, created_at) DESC, id DESC LIMIT -1 OFFSET ?",
+                (virtual_key, _iso(expired_before), max_entries),
+            )
+            doomed += [row["id"] for row in await cur.fetchall()]
+            if doomed:
+                marks = ", ".join("?" for _ in doomed)
+                await self.db.execute(f"DELETE FROM cache_entries WHERE id IN ({marks})", doomed)
+                await self.db.commit()
+            return doomed
+
+    async def clear_cache(self, virtual_key: str | None) -> int:
+        async with self._write_lock:
+            if virtual_key:
+                cur = await self.db.execute("DELETE FROM cache_entries WHERE virtual_key = ?", (virtual_key,))
+            else:
+                cur = await self.db.execute("DELETE FROM cache_entries")
+            await self.db.commit()
+            return cur.rowcount
+
+    async def cache_stats(self, virtual_key: str | None) -> list[dict]:
+        """Per key: lookups that hit, lookups that missed, live entries, and money saved by hits."""
+        where, params = ("WHERE virtual_key = ?", [virtual_key]) if virtual_key else ("", [])
+        cur = await self.db.execute(
+            f"""SELECT virtual_key, SUM(cache = 'hit') AS hits, SUM(cache = 'miss') AS misses
+                FROM request_logs {where + (" AND" if where else "WHERE")} cache IN ('hit', 'miss')
+                GROUP BY virtual_key""",
+            params,
+        )
+        stats = {row["virtual_key"]: {"hits": row["hits"], "misses": row["misses"]} for row in await cur.fetchall()}
+        cur = await self.db.execute(
+            f"""SELECT virtual_key, COUNT(*) AS entries, COALESCE(SUM(hit_count * cost_nano), 0) AS saved_nano
+                FROM cache_entries {where} GROUP BY virtual_key""",
+            params,
+        )
+        for row in await cur.fetchall():
+            stats.setdefault(row["virtual_key"], {"hits": 0, "misses": 0}).update(
+                entries=row["entries"], saved_nano=row["saved_nano"]
+            )
+        return [
+            {"virtual_key": k, "entries": 0, "saved_nano": 0, **v}
+            for k, v in sorted(stats.items(), key=lambda kv: kv[0])
+        ]
 
     # ---- reads for the admin API ---------------------------------------------------------
 

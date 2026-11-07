@@ -145,7 +145,7 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
   jitter, no retry on permanent 4xx (except 429), fallback flag in header and log.
 - [x] **Phase 6: Smart routing `auto` (~2 days).** (done, see status for honest numbers) Difficulty scorer (not length-based),
   length-only baseline, one-command eval with per-case accuracy.
-- [ ] **Phase 7: Semantic cache (~1.5 days).** Embeddings, cosine threshold, per-key (and
+- [x] **Phase 7: Semantic cache (~1.5 days).** (done, verified live) Embeddings, cosine threshold, per-key (and
   per-model) scoping, tuned on paraphrase pairs, hit rate tracking.
 - [ ] **Phase 8: Logs, usage API, console (~1.5 days).** Full request log, usage summary
   API, simple console. Numbers must match API and raw logs.
@@ -154,47 +154,113 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 
 ## Current status
 
-- Phases 0 to 4 DONE and pushed. Phase 5 (retries, failover, circuit breaker; 146 tests) was
-  delivered; confirm it is added and pushed. Provided load test passes on the user's machine
-  (10 accepted of limit 10; usage API matches the client totals exactly: 120 prompt, 259
-  completion tokens, 173400 nano-USD).
-- Phase 6 DONE in code (verify tests + push): the `auto` router. New `app/difficulty.py`
-  (`classify`), `route_auto` in `app/routing.py` now calls it, `tools/routing_eval.py` (the
-  one-command eval: `python -m tools.routing_eval`, from the project root; needs `tools/__init__.py`),
-  `data/routing_holdout.jsonl` (40 prompts the project author wrote BEFORE the classifier),
-  `tests/test_difficulty.py`, `tests/test_auto_routing.py`. 186 tests pass in the sandbox.
-- Verified live: easy prompts served by alpha-small (about 0.00001 USD), hard ones by alpha-large
-  (about 0.0006 USD, 30 to 50x more), each with its `route_reason` in the request log.
-- HONEST NUMBERS (put these in the README and verification report exactly as stated):
-  * Provided set (20): router 20/20 = 100%; length-only baseline (given its best threshold, 46
-    chars) 15/20 = 75%; on the 8 trap cases baseline 5/8, router 8/8. CAVEAT: the author could
-    see this set's answer key while designing the rules, so 100% is optimistic.
-  * Held-out set (40), the better estimate: FIRST RUN, nothing tuned: router 33/40 = 82.5%,
-    baseline 26/40 = 65%. After two general fixes made because of what the first run exposed
-    (vocabulary alone must not reach the threshold; "summarize" is only easy when there is text
-    to summarize): 35/40 = 87.5%. That second number is NOT independent any more.
-  * The 5 remaining misses are all hard prompts sent to the cheap tier, with no keyword cues
-    (tricky word problem, logic puzzle, ethics argument, conceptual-depth question). They are
-    documented, not patched with prompt-specific regexes.
-- Not yet done: semantic cache (Phase 7), console (Phase 8), README, verification report, demo video.
-- Smoke test still shows [5] and [6] failing until the cache exists.
-- Next: Phase 7, the semantic cache. DECIDE and document: (a) embedding method (candidates:
-  `fastembed` small ONNX model, no PyTorch, best fit for real paraphrases; or a no-dependency
-  hashed word/char n-gram vector with numpy, weaker on true paraphrase); (b) similarity
-  threshold per key from `virtual_keys.cache_threshold` (search 0.92, free-tier 0.85, others off);
-  (c) scope entries by (virtual_key, model alias), NEVER across keys, with a test that proves a
-  second key never gets the first key's answer; (d) cache hit: `x-prism-cache: hit`,
-  `x-prism-cost-usd: 0`, log status `cache_hit` (counts in usage requests and cache_hits, cost 0),
-  fallback false, provider header documented (e.g. `cache/hit` or the original provider);
-  (e) streaming + cache: replay a hit as one SSE chunk plus [DONE], or skip the cache for streams,
-  and document; (f) budget interplay: seed notes say budget-demo has the cache off so "a $0 cache
-  hit cannot mask the rejection"; decide whether a hit is served when the budget is exhausted;
-  (g) THE TRAP: smoke and load tests prepend a random salt like "(abc123)" to prompts; the load
-  test uses cache-busting salts on the free-tier key which has the cache ON at 0.85, so make sure
-  the matcher does not turn salted-but-different prompts into hits and break the load test's
-  accounting; the paraphrase pairs (a1/a2, b1/b2) MUST hit and the near-miss a3 (password reset vs
-  two-factor reset) MUST NOT. Only cache successful, non-streamed-error responses; never cache
-  the response for a request that was rejected.
+- Phases 0 to 5 delivered (Phase 5: retries, failover, circuit breaker). Phase 6 (`auto` router) delivered:
+  the user's own run matches ours exactly (20/20 provided, 35/40 held-out, baselines 75% / 65%).
+  Confirm Phases 5 and 6 are added and pushed.
+- Phase 7 DONE in code (verify tests + push): the semantic cache. New `app/embedding.py` (the matcher),
+  `app/cache.py` (scope, lookup, store, TTL, LRU), cache persistence in `app/store.py`, schema
+  additions in `app/db.py` (with migrations), stream assembly and replay in `app/streaming.py`,
+  cache step in `app/routes/chat.py`, `GET /admin/cache/stats` and `DELETE /admin/cache` in
+  `app/routes/admin.py`. 256 tests pass in the sandbox. `tests/conftest.py` now has TWO clients:
+  `client` (cache switched OFF for every key, for tests about other features) and `cache_client`
+  (cache as seeded). Old tests keep using `client`.
+- VERIFIED LIVE against the real mocks (put these in the verification report as stated):
+  * Provided smoke test, search key (threshold 0.92) AND free-tier key (0.85): 17 passed, 0 failed,
+    1 WARN (pair B). Run twice in a row on the persisted cache: "first request is a cache miss" still
+    holds, because a salt is an identifier token and a different salt never matches.
+  * Pair A (req_cache_a1 / a2): HIT, similarity 1.0. Near-miss a3: MISS, similarity 0.52.
+    Pair B (b1 / b2): MISS, similarity 0.33 = the documented limitation (no shared content words;
+    needs a real embedding model). Unrelated prompt: MISS (0.19).
+  * Load test on a cache-ON key (free-tier): 10 accepted of limit 10, all 10 real upstream calls (cache
+    stats: 0 hits, 10 misses: the random salts are identifiers, so they never match), and the usage API
+    equals the client totals exactly. The exact token and cost totals differ from run to run because the
+    mock's reply lengths vary (one verified run: 120 prompt, 276 completion tokens, 183600 nano-USD). USE
+    THE USER'S OWN RUN for the verification report, never these numbers.
+  * Tenant isolation live: same prompt on two cache-on keys: second key MISSES, then each hits only
+    its own entry; a paraphrase of one key's prompt also misses on the other key.
+  * Restart persistence: an entry stored before a gateway restart is hit (by a paraphrase) after it.
+  * Latency: with the provider at 800 ms, miss 837 ms vs hit 21 ms. (With the mock's default 0 ms
+    latency the difference is tiny; do not claim a speedup from that.)
+  * Streaming: a cached answer is replayed as a proper SSE stream (31 chunks, [DONE]); time-sensitive
+    prompt never cached.
+- MATCHER EVAL (honest numbers; `python -m tools.cache_eval`, from the project root). The tool scores
+  labeled pairs with the SAME matcher the gateway runs (`app/embedding.py`; a test fails if the tool ever
+  imports a different one). Pairs: the 3 from the provided sample requests plus 49 in
+  `data/cache_pairs_holdout.jsonl` (24 paraphrase, 25 near-miss, labels are the author's judgment). The
+  pair file was written AFTER the matcher existed and without tuning to it, so the FIRST run is a fair
+  held-out measurement:
+  * FIRST RUN, nothing tuned: @0.92 paraphrases hit 3/26 = 11.5%, FALSE hits 1/26; @0.85 paraphrases hit
+    5/26 = 19.2%, FALSE hits 5/26 = 19.2% (word-order swap n04; negation n17, n19; long prompts with one
+    critical word swapped n08, n25).
+  * Two general flaws found and fixed (so what follows is NOT independent any more): (1) negation
+    ("with"/"without", not, cannot, n't) must agree between the two prompts, a hard block; (2) "than",
+    "before", "after" keep their direction like to/from do, and direction detection now looks past
+    function words ("before THE tests").
+  * AFTER: @0.92: recall 3/26 = 11.5%, FALSE hits 0/26. @0.85: recall 5/26 = 19.2%, FALSE hits 2/26 = 7.7%
+    (n08 and n25 only). Those two are a KNOWN, intentional limit: on a long prompt one differing word still
+    scores ~0.89, a hit for a 0.85 key and a miss for a 0.92 key (a test pins this).
+  * Recall is LOW and must be stated plainly: the matcher has no synonyms, so most real paraphrases
+    ("price"/"cost", "money back"/"refund") miss. A miss costs money, a false hit serves a wrong answer,
+    so the matcher errs towards misses. The brief accepts this when the provided pair A hits and the
+    near-miss does not (both verified). Upgrade path: a real embedding model behind the same two methods.
+- Not yet done: Phase 8 (ops console), README, verification report, demo video, and the unresolved
+  latency question from Phase 4 (average 1005 ms on the user's machine vs 190-390 ms here; suspected
+  `localhost` resolving to IPv6 first; compare `Measure-Command` on `localhost` vs `127.0.0.1`; fix
+  would be `127.0.0.1` in the two `base_url` values of data/gateway_config.sample.json).
+- Next: Phase 8, the ops console: ONE static HTML page (served by the gateway, e.g. `GET /console`,
+  no build step) showing usage by key, recent requests (with status, provider, cache, fallback,
+  cost, latency, route_reason) and the cache hit rate, plus provider health. It calls the existing
+  admin API with the admin token (`GET /admin/usage`, `/admin/logs`, `/admin/cache/stats`,
+  `/admin/providers`). The brief says polish is not graded. Then README, then the verification
+  report, then the demo script.
+
+### Phase 7 design decisions (feed the README)
+
+- MATCHER: a documented local substitute, `lexical-content-words-v1` in `app/embedding.py`, NOT a
+  neural embedding model. Chosen because the sandbox could not download model weights, so a real
+  model could not be tested, and the brief allows "a clearly documented local substitute" provided the
+  paraphrase pairs hit. The `Embedder` shape (`embed`, `similarity`) is the seam for swapping in a real
+  model (a Stretch item in the brief); nothing else knows how the score is produced. If the user wants
+  to try it on their machine (needs internet for the model, and a Python version onnxruntime supports,
+  which is uncertain for 3.14), add an embedder with the same two methods and switch it in `main.py`.
+- Similarity = cosine of binary stemmed content-word vectors, times 0.8 if the question type differs
+  (how / why / what / when / where / who / which / yes-no / other). Stopwords and frame words ("how do I",
+  "what are the steps to") are removed; negations are kept as content.
+- Guards that force a score of 0: identifier-like tokens (anything containing a digit: order numbers,
+  versions, the test scripts' random salts) must match EXACTLY; negation must agree ("with" vs
+  "without", not, cannot, n't); directed pairs around to/from/into/onto/vs/than/before/after must match
+  when both prompts have them ("convert USD to EUR" is not "convert EUR to USD", "A faster than B" is
+  not "B faster than A"); the nearest content word on each side counts, skipping function words.
+- Seed thresholds are used as given (search 0.92, free-tier 0.85; research and budget-demo cache off).
+  With this matcher 0.92 means near-identical content, 0.85 tolerates about one differing word in 7.
+- SCOPE (exact-match filters, never similarity): virtual key, model/alias as sent (`fast`, `smart`,
+  `auto` are separate), parameter fingerprint (temperature, max_tokens, ...), and the system prompt +
+  earlier turns (exact). Similarity is applied only to the LAST user message. Multi-turn choice:
+  last user message by similarity within an exactly-matching conversation prefix.
+- NEVER cached or looked up: key with cache off; time-sensitive prompts (current, now, today, latest,
+  status of, weather, ...); prompts over 4000 chars; errors; partial streams; responses with no text.
+- Cache hit: `x-prism-cache: hit`, `x-prism-provider: cache`, `x-prism-cost-usd: 0`, `x-prism-fallback:
+  false`; log status `cache_hit`, `cache` = hit, `resolved_provider/model` null, `cache_similarity` set,
+  `route_reason` notes the hit. Response body `usage` is ZERO and the log tokens are zero: usage tokens
+  mean "tokens consumed upstream", so tokens x price = cost for every request.
+- Log `cache` values: `hit`, `miss` (cache consulted, no match), `bypass` (not consulted: key off,
+  uncacheable prompt, or rejected before the cache). The header is `miss` for both miss and bypass
+  (the contract only allows hit or miss). Hit rate = hits / (hits + misses); bypass is excluded.
+- Order: budget is checked BEFORE the cache, so a key with an exhausted budget is rejected even for a
+  free cached answer (strict, documented). Hits still consume rate-limit slots.
+- Streaming: a completed stream is assembled and cached; a hit is replayed to a streaming caller as a
+  proper SSE stream (role chunk, word chunks, final chunk, [DONE]); streams and non-streams share entries.
+- Lifecycle: TTL 24 h (`PRISM_CACHE_TTL_S`), at most 500 entries per key (`PRISM_CACHE_MAX_ENTRIES_PER_KEY`),
+  least recently used evicted first, expired entries purged on the next write. Persisted in SQLite, with a
+  lazy per-scope in-memory index. Concurrent identical requests both go upstream (no single-flight) but
+  their entries are merged, never duplicated.
+- The cache is an optimisation: lookup/store errors are logged and treated as a miss / skipped.
+- Privacy: an entry holds the full response and the first 200 chars of the prompt; the request log
+  holds no bodies. Scope is per virtual key (team), not per end user.
+- Known limitations: low recall (see MATCHER EVAL); word-based (pair B misses; also misses paraphrases with different vocabulary);
+  English only; a one-word difference below the threshold can still hit on long prompts; per-process
+  in-memory index (single instance); no single-flight; sampling parameters are in the scope key, but
+  high-temperature callers still get the same cached text for the same prompt.
 
 ### Phase 6 design decisions (feed the README)
 

@@ -1,0 +1,49 @@
+{"id": "p01", "kind": "paraphrase", "a": "How do I reset my password?", "b": "What is the process for resetting my password?"}
+{"id": "p02", "kind": "paraphrase", "a": "What are your business hours?", "b": "When are you open for business?"}
+{"id": "p03", "kind": "paraphrase", "a": "How can I cancel my subscription?", "b": "What are the steps to cancel my subscription?"}
+{"id": "p04", "kind": "paraphrase", "a": "What is the price of the premium plan?", "b": "How much does the premium plan cost?"}
+{"id": "p05", "kind": "paraphrase", "a": "Can I get a refund for my annual plan?", "b": "How do I request a refund on my yearly plan?"}
+{"id": "p06", "kind": "paraphrase", "a": "How do I change my email address?", "b": "What are the steps to change the email address on my account?"}
+{"id": "p07", "kind": "paraphrase", "a": "Where can I download my invoices?", "b": "How do I download my invoices?"}
+{"id": "p08", "kind": "paraphrase", "a": "What payment methods do you accept?", "b": "Which payment methods can I use?"}
+{"id": "p09", "kind": "paraphrase", "a": "Is my data encrypted?", "b": "Do you encrypt my data?"}
+{"id": "p10", "kind": "paraphrase", "a": "How do I delete my account?", "b": "I want to remove my account permanently."}
+{"id": "p11", "kind": "paraphrase", "a": "How long does shipping take?", "b": "What is the delivery time for shipping?"}
+{"id": "p12", "kind": "paraphrase", "a": "How do I enable dark mode?", "b": "What are the steps to turn on dark mode?"}
+{"id": "p13", "kind": "paraphrase", "a": "What is the difference between TCP and UDP?", "b": "How do TCP and UDP differ?"}
+{"id": "p14", "kind": "paraphrase", "a": "Explain what a load balancer does.", "b": "What does a load balancer do?"}
+{"id": "p15", "kind": "paraphrase", "a": "How do I contact support?", "b": "What's the best way to reach customer support?"}
+{"id": "p16", "kind": "paraphrase", "a": "Why is my app running slowly?", "b": "Why is my application slow?"}
+{"id": "p17", "kind": "paraphrase", "a": "What is two-factor authentication?", "b": "Explain 2FA."}
+{"id": "p18", "kind": "paraphrase", "a": "How do I upgrade to the pro plan?", "b": "What do I need to do to upgrade to the pro plan?"}
+{"id": "p19", "kind": "paraphrase", "a": "Can I export my data as CSV?", "b": "How do I export my data to a CSV file?"}
+{"id": "p20", "kind": "paraphrase", "a": "What is the capital city of Japan?", "b": "Which city is Japan's capital?"}
+{"id": "p21", "kind": "paraphrase", "a": "Tell me how to install Python on Windows.", "b": "How can I install Python on a Windows machine?"}
+{"id": "p22", "kind": "paraphrase", "a": "What happens if I miss a payment?", "b": "What if my payment is late?"}
+{"id": "p23", "kind": "paraphrase", "a": "Is there a free trial?", "b": "Do you offer a free trial?"}
+{"id": "p24", "kind": "paraphrase", "a": "How do I reset my two-factor authentication on the dashboard?", "b": "What are the steps to reset 2FA on my dashboard?"}
+{"id": "n02", "kind": "near_miss", "note": "guarded: antonym", "a": "How do I enable two-factor authentication?", "b": "How do I disable two-factor authentication?"}
+{"id": "n03", "kind": "near_miss", "note": "one qualifier differs", "a": "What is the price of the premium plan?", "b": "What is the price of the basic plan?"}
+{"id": "n04", "kind": "near_miss", "note": "guarded: word order flips the meaning", "a": "Is Python faster than Java?", "b": "Is Java faster than Python?"}
+{"id": "n05", "kind": "near_miss", "note": "different attribute", "a": "What is the capital of France?", "b": "What is the population of France?"}
+{"id": "n06", "kind": "near_miss", "note": "different subject", "a": "Can dogs eat grapes?", "b": "Can cats eat grapes?"}
+{"id": "n07", "kind": "near_miss", "note": "guarded: conversion direction", "a": "Convert 5 miles to kilometers.", "b": "Convert 5 kilometers to miles."}
+{"id": "n08", "kind": "near_miss", "note": "UNGUARDED: long prompt, one critical word swapped", "a": "How do I configure SSL certificates for nginx on Ubuntu for my production web server cluster?", "b": "How do I configure SSL certificates for apache on Ubuntu for my production web server cluster?"}
+{"id": "n09", "kind": "near_miss", "note": "antonym-like qualifier not in any list", "a": "Which database is best for small apps?", "b": "Which database is best for large apps?"}
+{"id": "n10", "kind": "near_miss", "note": "guarded: different number", "a": "Who won the 2018 World Cup?", "b": "Who won the 2022 World Cup?"}
+{"id": "n11", "kind": "near_miss", "note": "one qualifier differs", "a": "What is the refund policy for annual plans?", "b": "What is the refund policy for monthly plans?"}
+{"id": "n12", "kind": "near_miss", "note": "guarded: antonym", "a": "How do I add a user to my team?", "b": "How do I remove a user from my team?"}
+{"id": "n13", "kind": "near_miss", "note": "guarded: antonym", "a": "Why does my build fail on CI?", "b": "Why does my build pass on CI?"}
+{"id": "n14", "kind": "near_miss", "note": "guarded: antonym", "a": "Can I downgrade my plan?", "b": "Can I upgrade my plan?"}
+{"id": "n15", "kind": "near_miss", "note": "different subject", "a": "What is the weather like in Paris?", "b": "What is the weather like in Rome?"}
+{"id": "n16", "kind": "near_miss", "note": "different subject", "a": "How do I cook rice?", "b": "How do I cook pasta?"}
+{"id": "n17", "kind": "near_miss", "note": "guarded: negation", "a": "Is it safe to take ibuprofen with alcohol?", "b": "Is it safe to take ibuprofen without alcohol?"}
+{"id": "n18", "kind": "near_miss", "note": "different attribute", "a": "What are the side effects of aspirin?", "b": "What are the benefits of aspirin?"}
+{"id": "n19", "kind": "near_miss", "note": "guarded: negation", "a": "Can I use the API without an account?", "b": "Can I use the API with an account?"}
+{"id": "n20", "kind": "near_miss", "note": "guarded: different number", "a": "Show me sales for Q1.", "b": "Show me sales for Q2."}
+{"id": "n21", "kind": "near_miss", "note": "different subject", "a": "How do I reset the router?", "b": "How do I reset the printer?"}
+{"id": "n22", "kind": "near_miss", "note": "one qualifier differs", "a": "Does the free plan include support?", "b": "Does the pro plan include support?"}
+{"id": "n23", "kind": "near_miss", "note": "different target", "a": "Translate 'hello' to French.", "b": "Translate 'hello' to German."}
+{"id": "n24", "kind": "near_miss", "note": "guarded: different number", "a": "Summarize the main causes of World War 1.", "b": "Summarize the main causes of World War 2."}
+{"id": "n25", "kind": "near_miss", "note": "UNGUARDED: long prompt, one critical word swapped", "a": "What are the steps to migrate our production PostgreSQL database from version 12 to version 15 without downtime?", "b": "What are the steps to migrate our production MySQL database from version 12 to version 15 without downtime?"}
+{"id": "n26", "kind": "near_miss", "note": "one extra option", "a": "Is a tomato a fruit or a vegetable?", "b": "Is a tomato a fruit?"}

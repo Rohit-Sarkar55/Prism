@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     provider_timeout_s: float = 2.0
     # Upper bound for retries plus failover on one request.
     upstream_deadline_s: float = 10.0
+    cache_ttl_s: float = 86_400  # cache entries expire after 24 h
+    cache_max_entries_per_key: int = 500  # least recently used entries go first
 
 
 def get_settings() -> Settings:

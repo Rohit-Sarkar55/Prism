@@ -23,16 +23,35 @@ def fakes():
     return {"alpha": FakeAdapter("alpha"), "beta": FakeAdapter("beta")}
 
 
+def install_fakes(fakes):
+    """Put fake providers (fast, deterministic retries) behind the running app."""
+    registry = ProviderRegistry(dict(fakes))
+    app.state.providers = registry
+    app.state.health = ProviderHealth()
+    app.state.upstream = Upstream(
+        registry, app.state.health, RetryPolicy(initial_backoff_ms=1), sleep=no_sleep, rng=lambda: 0.5
+    )
+
+
+@pytest.fixture
+async def cache_client(fakes):
+    """The real app (real startup, real SQLite) with fake providers, and the cache exactly as seeded:
+    on for the search and free-tier keys, off for research and budget-demo."""
+    async with app.router.lifespan_context(app):
+        install_fakes(fakes)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as c:
+            yield c
+
+
 @pytest.fixture
 async def client(fakes):
-    """The real app (real startup, real SQLite) with fake providers behind the registry."""
+    """Like cache_client but with the cache switched off for every key, so tests about routing, limits,
+    budgets, failover and streaming can repeat the same prompt without it being served from the cache."""
     async with app.router.lifespan_context(app):
-        registry = ProviderRegistry(dict(fakes))
-        app.state.providers = registry
-        app.state.health = ProviderHealth()
-        app.state.upstream = Upstream(
-            registry, app.state.health, RetryPolicy(initial_backoff_ms=1), sleep=no_sleep, rng=lambda: 0.5
-        )
+        install_fakes(fakes)
+        await app.state.db.execute("UPDATE virtual_keys SET cache_enabled = 0")
+        await app.state.db.commit()
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as c:
             yield c

@@ -7,7 +7,7 @@ Order of checks, documented because the brief asks for it:
   4. model allowlist                       -> 403 model_not_allowed
   5. requests-per-minute limit             -> 429 rate_limit_exceeded (with Retry-After)
   6. monthly budget (spent < budget)       -> 402 budget_exceeded
-  7. (Phase 7) semantic cache
+  7. semantic cache lookup (scoped per key, alias, params and earlier conversation) -> hit: no upstream call
   8. upstream call: timeout per attempt, retries with backoff, failover down the chain (upstream.py)
 Every request is logged, including every rejection.
 """
@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from app.cache import CacheHit, CachePlan, completion_body
 from app.costs import compute_cost_nano
 from app.errors import (
     GatewayError,
@@ -35,7 +36,7 @@ from app.headers import prism_headers
 from app.providers import Usage
 from app.routing import Route, resolve_route
 from app.store import KeyRecord, LogEntry, Store
-from app.streaming import sse_stream
+from app.streaming import replay_stream, sse_stream
 
 logger = logging.getLogger("prism.chat")
 router = APIRouter()
@@ -83,6 +84,7 @@ class RequestContext:
     virtual_key: str | None = None
     requested_model: str | None = None
     route: Route | None = None
+    cache_state: str = "bypass"  # becomes "miss" once the cache was actually consulted
 
     def elapsed_ms(self) -> int:
         return int((time.monotonic() - self.started) * 1000)
@@ -94,26 +96,28 @@ class RequestContext:
             err.log_status,
             virtual_key=self.virtual_key,
             requested_model=self.requested_model,
+            cache=self.cache_state,
             retries=err.retries,
             latency_ms=self.elapsed_ms(),
         )
 
-    def served(self, status: str, provider: str, model: str, usage: Usage, cost_nano: int, **extra) -> LogEntry:
-        return LogEntry(
-            self.request_id,
-            self.created_at,
-            status,
-            virtual_key=self.virtual_key,
-            requested_model=self.requested_model,
-            resolved_provider=provider,
-            resolved_model=model,
-            prompt_tokens=usage.prompt_tokens,
-            completion_tokens=usage.completion_tokens,
-            cost_nano=cost_nano,
-            route_reason=self.route.reason if self.route else None,
-            latency_ms=self.elapsed_ms(),
-            **extra,
-        )
+    def served(
+        self, status: str, provider: str | None, model: str | None, usage: Usage, cost_nano: int, **extra
+    ) -> LogEntry:
+        fields = {
+            "virtual_key": self.virtual_key,
+            "requested_model": self.requested_model,
+            "resolved_provider": provider,
+            "resolved_model": model,
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "cost_nano": cost_nano,
+            "cache": self.cache_state,
+            "route_reason": self.route.reason if self.route else None,
+            "latency_ms": self.elapsed_ms(),
+        }
+        fields.update(extra)
+        return LogEntry(self.request_id, self.created_at, status, **fields)
 
 
 @router.post("/v1/chat/completions")
@@ -140,6 +144,12 @@ async def chat_completions(request: Request):
             raise budget_exhausted(key.monthly_budget_nano)
         params = {k: body[k] for k in PASS_THROUGH if k in body}
         streaming = bool(body.get("stream"))
+        plan = state.cache.plan(key, body["model"], body["messages"], params)
+        if plan is not None:
+            ctx.cache_state = "miss"
+            hit = await _safe_lookup(state, plan)
+            if hit is not None:
+                return await _serve_cache_hit(store, ctx, hit, streaming)
         upstream_started = time.monotonic()
         if streaming:
             opened = await state.upstream.open_stream(ctx.route.chain, body["messages"], params)
@@ -153,11 +163,11 @@ async def chat_completions(request: Request):
         return error_response(err, ctx.request_id)
 
     if streaming:
-        return _stream_response(state, store, ctx, opened, upstream_started)
-    return await _complete(state, store, ctx, outcome)
+        return _stream_response(state, store, ctx, opened, upstream_started, plan)
+    return await _complete(state, store, ctx, outcome, plan)
 
 
-async def _complete(state, store: Store, ctx: RequestContext, outcome) -> JSONResponse:
+async def _complete(state, store: Store, ctx: RequestContext, outcome, plan: CachePlan | None) -> JSONResponse:
     usage = outcome.result.usage
     cost_nano = compute_cost_nano(state.pricing, outcome.model, usage)
     await store.record_served(
@@ -172,6 +182,12 @@ async def _complete(state, store: Store, ctx: RequestContext, outcome) -> JSONRe
             upstream_ms=outcome.result.latency_ms,
         )
     )
+    if plan is not None:
+        choice = (outcome.result.body.get("choices") or [{}])[0]
+        await _safe_store(
+            state, plan, (choice.get("message") or {}).get("content"), outcome.model,
+            choice.get("finish_reason") or "stop", cost_nano,
+        )  # fmt: skip
     headers = prism_headers(
         provider=f"{outcome.provider}/{outcome.model}",
         fallback=outcome.fallback,
@@ -181,8 +197,10 @@ async def _complete(state, store: Store, ctx: RequestContext, outcome) -> JSONRe
     return JSONResponse(outcome.result.body, headers=headers)
 
 
-def _stream_response(state, store: Store, ctx: RequestContext, opened, upstream_started: float) -> StreamingResponse:
-    async def record(status: str, usage: Usage | None) -> None:
+def _stream_response(
+    state, store: Store, ctx: RequestContext, opened, upstream_started: float, plan: CachePlan | None
+) -> StreamingResponse:
+    async def record(status: str, usage: Usage | None, content: str) -> None:
         usage = usage or Usage(0, 0)
         cost_nano = compute_cost_nano(state.pricing, opened.model, usage)
         await store.record_served(
@@ -197,6 +215,8 @@ def _stream_response(state, store: Store, ctx: RequestContext, opened, upstream_
                 upstream_ms=int((time.monotonic() - upstream_started) * 1000),
             )
         )
+        if plan is not None and status == "ok":  # a partial stream (provider died, client left) is never cached
+            await _safe_store(state, plan, content, opened.model, "stop", cost_nano)
 
     # Headers are sent before the body, so the final cost is not known yet: x-prism-cost-usd is
     # omitted (the API contract allows this for streams). The cost goes to the log and usage API.
@@ -209,3 +229,41 @@ def _stream_response(state, store: Store, ctx: RequestContext, opened, upstream_
     headers["cache-control"] = "no-cache"
     headers["x-accel-buffering"] = "no"  # ask reverse proxies (nginx) not to buffer the stream
     return StreamingResponse(sse_stream(opened, record), media_type="text/event-stream", headers=headers)
+
+
+# ---- cache helpers: the cache is an optimisation, so it may never break a request -----------------
+
+
+async def _safe_lookup(state, plan: CachePlan) -> CacheHit | None:
+    try:
+        return await state.cache.lookup(plan)
+    except Exception:
+        logger.exception("cache lookup failed; treating as a miss")
+        return None
+
+
+async def _safe_store(state, plan: CachePlan, content, model: str, finish_reason: str, cost_nano: int) -> None:
+    if not isinstance(content, str):
+        return
+    try:
+        await state.cache.store_response(
+            plan, content=content, model=model, finish_reason=finish_reason, cost_nano=cost_nano
+        )
+    except Exception:
+        logger.exception("cache store failed; the response was still served")
+
+
+async def _serve_cache_hit(store: Store, ctx: RequestContext, hit: CacheHit, streaming: bool):
+    note = f"cache hit (similarity {hit.similarity:.3f}, entry {hit.entry_id})"
+    reason = f"{ctx.route.reason} | {note}" if ctx.route and ctx.route.reason else note
+    entry = ctx.served(
+        "cache_hit", None, None, Usage(0, 0), 0,  # nothing consumed upstream: no provider, no tokens, no cost
+        cache="hit", cache_similarity=round(hit.similarity, 4), route_reason=reason,
+    )  # fmt: skip
+    await store.record_served(entry, cache_entry_id=hit.entry_id)
+    headers = prism_headers(provider="cache", cache="hit", fallback=False, cost_nano=0, request_id=ctx.request_id)
+    if streaming:
+        headers["cache-control"] = "no-cache"
+        headers["x-accel-buffering"] = "no"
+        return StreamingResponse(replay_stream(hit), media_type="text/event-stream", headers=headers)
+    return JSONResponse(completion_body(hit), headers=headers)

@@ -70,3 +70,43 @@ async def providers(request: Request):
             name: health.get(name, {"state": "healthy", "recent_calls": 0, "recent_error_rate": 0.0}) for name in names
         }
     }
+
+
+def _cache_row(row: dict) -> dict:
+    lookups = row["hits"] + row["misses"]
+    return {
+        "hits": row["hits"],
+        "misses": row["misses"],
+        "hit_rate": round(row["hits"] / lookups, 4) if lookups else 0.0,
+        "entries": row["entries"],
+        "saved_nano": row["saved_nano"],  # exact: what the hits would have cost upstream
+        "saved_usd": float(nano_to_usd_str(row["saved_nano"])),
+    }
+
+
+@router.get("/cache/stats")
+async def cache_stats(request: Request, key: str | None = None):
+    """Hit rate counts only requests that consulted the cache (hit or miss); requests for keys with the
+    cache off, uncacheable prompts and rejected requests are not lookups."""
+    require_admin(request)
+    state = request.app.state
+    if key is not None and not await state.store.key_exists(key):
+        raise not_found(key)
+    rows = await state.store.cache_stats(key)
+    matcher = state.cache.embedder.name
+    if key is not None:
+        row = next(iter(rows), {"hits": 0, "misses": 0, "entries": 0, "saved_nano": 0})
+        return {"key": key, "matcher": matcher, **_cache_row(row)}
+    total = {f: sum(r[f] for r in rows) for f in ("hits", "misses", "entries", "saved_nano")}
+    return {
+        "matcher": matcher,
+        "overall": _cache_row(total),
+        "by_key": [{"key": r["virtual_key"], **_cache_row(r)} for r in rows],
+    }
+
+
+@router.delete("/cache")
+async def clear_cache(request: Request, key: str | None = None):
+    """Purge cached entries (all, or one key's). Useful before a demo and after changing prompts."""
+    require_admin(request)
+    return {"deleted": await request.app.state.cache.clear(key)}

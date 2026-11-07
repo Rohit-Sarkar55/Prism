@@ -56,11 +56,10 @@ def run(cases: list[dict], tiers: dict[str, str], threshold: int) -> list[dict]:
 
 
 def pct(rows: list[dict], key: str) -> str:
-    return (
-        f"{sum(r[key] == r['expected'] for r in rows)}/{len(rows)} = {sum(r[key] == r['expected'] for r in rows) / len(rows):.0%}"
-        if rows
-        else "n/a"
-    )
+    if not rows:
+        return "n/a"
+    correct = sum(r[key] == r["expected"] for r in rows)
+    return f"{correct}/{len(rows)} = {correct / len(rows):.1%}"
 
 
 def print_set(name: str, rows: list[dict], threshold: int, verbose: bool) -> None:

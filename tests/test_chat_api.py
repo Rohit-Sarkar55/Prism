@@ -49,7 +49,9 @@ async def test_successful_completion_has_openai_body_and_full_header_contract(cl
 async def test_cost_is_logged_and_metered_from_provider_usage(client):
     await client.post("/v1/chat/completions", json=BODY, headers=auth(SEARCH))
     entry = (await logs(client, SEARCH))[0]
-    assert entry["status"] == "ok" and entry["cache"] == "miss" and entry["fallback"] is False
+    assert (
+        entry["status"] == "ok" and entry["cache"] == "bypass" and entry["fallback"] is False
+    )  # cache is off in this fixture
     assert (entry["resolved_provider"], entry["resolved_model"]) == ("alpha", "alpha-small")
     assert (entry["prompt_tokens"], entry["completion_tokens"], entry["cost_nano"]) == (5, 5, EXPECTED_COST_NANO)
     assert entry["latency_ms"] is not None and entry["upstream_ms"] is not None

@@ -130,10 +130,12 @@ async def test_concurrent_streams_are_all_recorded(client):
 class Recorder:
     def __init__(self):
         self.calls: list[tuple[str, Usage | None]] = []
+        self.contents: list[str] = []
 
-    async def __call__(self, status, usage):
+    async def __call__(self, status, usage, content):
         await anyio.lowlevel.checkpoint()  # a real await, so an unshielded cancelled scope would break it
         self.calls.append((status, usage))
+        self.contents.append(content)
 
 
 async def opened_stream(fake):

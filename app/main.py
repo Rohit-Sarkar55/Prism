@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
+from app.cache import SemanticCache
 from app.config import get_settings
 from app.db import init_schema, open_db
 from app.errors import GatewayError, error_response
@@ -31,6 +32,9 @@ async def lifespan(app: FastAPI):
     await seed_keys(app.state.db, settings.data_dir / "seed_keys.json")
     app.state.store = Store(app.state.db)
     app.state.limiter = SlidingWindowLimiter()
+    app.state.cache = SemanticCache(
+        app.state.store, ttl_s=settings.cache_ttl_s, max_entries_per_key=settings.cache_max_entries_per_key
+    )
     try:
         yield
     finally:
