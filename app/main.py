@@ -6,6 +6,7 @@ from app.config import get_settings
 from app.db import init_schema, open_db
 from app.errors import GatewayError, error_response
 from app.providers import ProviderRegistry
+from app.ratelimit import SlidingWindowLimiter
 from app.routes import admin, chat
 from app.seed import load_gateway_config, load_pricing, seed_keys, validate_config
 from app.store import Store
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI):
     await init_schema(app.state.db)
     await seed_keys(app.state.db, settings.data_dir / "seed_keys.json")
     app.state.store = Store(app.state.db)
+    app.state.limiter = SlidingWindowLimiter()
     try:
         yield
     finally:

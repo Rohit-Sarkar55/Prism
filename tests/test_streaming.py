@@ -5,10 +5,8 @@ import json
 
 import anyio
 import anyio.lowlevel
-import httpx
 import pytest
 
-from app.main import app
 from app.providers import ProviderRegistry, Usage
 from app.providers.fake import FakeAdapter
 from app.streaming import sse_stream
@@ -28,15 +26,6 @@ def auth(key: str = SEARCH) -> dict:
 @pytest.fixture
 def fakes():
     return {"alpha": FakeAdapter("alpha", reply=REPLY), "beta": FakeAdapter("beta", reply=REPLY)}
-
-
-@pytest.fixture
-async def client(fakes):
-    async with app.router.lifespan_context(app):
-        app.state.providers = ProviderRegistry(dict(fakes))
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as c:
-            yield c
 
 
 def data_lines(text: str) -> list[str]:

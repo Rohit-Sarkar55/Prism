@@ -149,6 +149,15 @@ class Store:
         )
         return dict(await cur.fetchone())
 
+    async def month_spent_nano(self, virtual_key: str, month: str) -> int:
+        """The budget check: one primary-key read. A new month has no row yet, so it reads as 0
+        (the budget resets by itself on the first request of the month)."""
+        cur = await self.db.execute(
+            "SELECT cost_nano FROM usage_monthly WHERE virtual_key = ? AND month = ?", (virtual_key, month)
+        )
+        row = await cur.fetchone()
+        return row["cost_nano"] if row else 0
+
     async def month_usage(self, virtual_key: str, month: str) -> dict | None:
         cur = await self.db.execute(
             "SELECT * FROM usage_monthly WHERE virtual_key = ? AND month = ?", (virtual_key, month)

@@ -138,7 +138,7 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
   virtual-key auth, alias resolution, four headers, cost from price table.
 - [x] **Phase 3: Streaming (~1 day).** (code written and verified live, see status) Chunk pass-through, `data: [DONE]`, usage recorded in
   a `finally` block (including client disconnect).
-- [ ] **Phase 4: Allowlist, rate limits, budgets (~2 days).** Distinct errors, atomic
+- [x] **Phase 4: Allowlist, rate limits, budgets (~2 days).** (done, load test passes live) Distinct errors, atomic
   enforcement. Done when a 50+ parallel request test shows zero over-admission and totals
   match the log. Riskiest phase: write tests first.
 - [ ] **Phase 5: Routing, retries, failover (~1.5 days).** Fallback chain, backoff with
@@ -154,26 +154,60 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 
 ## Current status
 
-- Phases 0, 1, 2 DONE and pushed (73 tests passing on Windows): setup, schema, seed loader,
-  provider adapter + fake + registry, non-streaming chat endpoint, auth, headers, cost
-  metering, request logs, admin usage/logs.
-- Phase 3 DONE in code (verify tests + push): streaming pass-through. New `app/streaming.py`
-  (`sse_stream`), `open_stream` in `app/upstream.py`, streaming branch in `app/routes/chat.py`
-  (refactored around a `RequestContext`). `FakeAdapter` gained `chunk_delay_s`, `emitted`,
-  `stream_closed`, `stream_usage`. 84 tests pass in the sandbox.
-- Verified live against the real mocks: provided `smoke_test.py` sections [1] to [4] all PASS
-  (non-streaming, streaming, auth, unknown model) and [7]. Sections [5] and [6] FAIL because
-  there is no cache yet (Phase 7). Chunks reach the client ~20 ms apart (the mock's pacing),
-  so nothing is buffered. A client that hangs up mid-stream is logged as `client_disconnect`.
-- Not yet done: rate limit, budget (Phase 4), retries/failover (Phase 5), `auto` router
-  (Phase 6, placeholder now), semantic cache (Phase 7), console (Phase 8), README, verification
-  report, demo video.
-- Next: Phase 4, the riskiest: model allowlist is done, add per-key requests-per-minute limit
-  (race-safe sliding window, no await between check and record) and monthly budget
-  (admit while spent < budget, add actual cost after; budget-demo key must pass once then get
-  `budget_exceeded`). Distinct errors: 429 `rate_limit_exceeded`, budget 429 or 402
-  `budget_exceeded`. Then run `scripts/load_test.py --key prism-sk-free-7g8h9i --requests 30
-  --concurrency 10 --rpm-limit 10` and require zero over-admission.
+- Phases 0 to 3 DONE and pushed (84 tests on Windows): setup, schema, seed loader, provider
+  adapter, chat endpoint, auth, headers, cost metering, logs, admin usage/logs, streaming.
+- Phase 4 DONE in code (verify tests + push): per-key rate limit and monthly budget. New
+  `app/ratelimit.py` (`SlidingWindowLimiter`), `rate_limited` and `budget_exhausted` in
+  `app/errors.py`, `Store.month_spent_nano`, `format_usd` in `app/money.py`, enforcement in
+  `app/routes/chat.py`. Shared test fixtures (`fakes`, `client`) moved to `tests/conftest.py`.
+  102 tests pass in the sandbox.
+- Verified live against the real mocks: provided `scripts/load_test.py --key prism-sk-free-7g8h9i
+  --requests 30 --concurrency 10 --rpm-limit 10` reports 10 accepted, 20 rate limited, "Over-admission
+  check OK". Client totals match the usage API exactly (120 prompt, 267 completion tokens,
+  cost 178200 nano = 0.0001782 USD; the script prints the cost rounded to 6 decimals).
+  Budget-demo key: first request 200, second 402 `budget_exceeded`, both logged.
+- Provided `smoke_test.py`: sections [1] to [4] and [7] pass; [5] and [6] fail until the cache
+  exists (Phase 7).
+- Not yet done: retries/failover (Phase 5; a down provider is a 502 now), `auto` router (Phase 6,
+  placeholder), semantic cache (Phase 7), console (Phase 8), README, verification report,
+  demo video.
+- Next: Phase 5, retries with exponential backoff + jitter, then failover down the alias chain,
+  `x-prism-fallback: true`, fallback and retry count in the log. Config has
+  `retry: {max_attempts: 3, initial_backoff_ms: 200, backoff_multiplier: 2}` and a suggested
+  `degradation` block. Replace the single attempt in `app/upstream.py` (`call_upstream` and
+  `open_stream`); keep their signatures. Decide: retry only transient `ProviderError`s, fail over
+  on any ProviderError except for permanent client errors that are the caller's fault (to decide
+  and document), never fail over after the first streamed chunk. Demo drill: alpha `down` ->
+  beta serves with fallback true; alpha `latency_ms: 3000` -> timeout then fallback; alpha
+  `fail_rate: 0.3` -> retries absorb it; restore alpha -> primary serves again immediately.
+
+### Phase 4 design decisions (feed the README)
+
+- Check order: authenticate -> validate -> resolve model -> allowlist -> RATE LIMIT -> BUDGET ->
+  (cache) -> upstream. Allowlist rejections do not consume rate-limit slots (a test pins this).
+  A request rejected by the budget did consume a rate-limit slot.
+- Rate limiter: sliding-window LOG per key (exactly at most `rpm` hits in any 60s window), in
+  memory, race-safe because check-and-record is one synchronous step (no await between read and
+  write) behind a lock. A threaded test fires 400 calls at a limit of 10 and requires exactly 10
+  admitted. Rejected requests are not recorded, so hammering while limited does not extend the
+  penalty. 429 carries `Retry-After`.
+- State is per process and resets on restart (single-instance assumption; multi-instance would
+  need Redis or similar). Memory is bounded by `rpm` timestamps per key.
+- Budget: admit while `spent < budget`, add the real cost after the response. Spent is read from
+  `usage_monthly` (one primary-key read, no log scan). Calendar month in UTC, keyed by `YYYY-MM`,
+  so it resets by itself on the first request of a new month ("reset-on-read"), with no job.
+- Documented overshoot: cost is only known after the provider answers, so a request admitted
+  while budget remains may push spend past the budget, and requests in flight at the same time
+  can each do so. Bound: roughly (requests admitted concurrently) x (cost of one request); the
+  rpm limit also caps how many can be admitted per minute. Streams are admitted the same way.
+- Budget exhaustion is HTTP 402 (not 429): SDKs auto-retry 429, and retrying cannot fix an
+  exhausted budget. The rate limit is 429. Bodies are distinguishable by `type`.
+- Not enforced: `tokens_per_minute` (stored in the DB, Good-to-Have in the brief).
+- Known limitation: every rejection, including unauthenticated ones, writes a log row, so a flood
+  of bad requests grows the log; mitigation would be sampling or aggregating `rejected_auth`.
+- Cache hits and budget (Phase 7 decision pending): the seed notes the budget-demo key has the
+  cache disabled "so a $0 cache hit cannot mask the rejection", which implies cache hits may be
+  served even when the budget is exhausted. Decide and document.
 
 ### Phase 3 design decisions (feed the README)
 

@@ -5,9 +5,10 @@ Order of checks, documented because the brief asks for it:
   2. validate the body                     -> 400 invalid_request_error
   3. resolve model/alias                   -> 404 not_found_error
   4. model allowlist                       -> 403 model_not_allowed
-  5. (Phase 4) rate limit -> 429, then budget -> 429/402
-  6. (Phase 7) semantic cache
-  7. upstream call with timeout (retries and failover in Phase 5)
+  5. requests-per-minute limit             -> 429 rate_limit_exceeded (with Retry-After)
+  6. monthly budget (spent < budget)       -> 402 budget_exceeded
+  7. (Phase 7) semantic cache
+  8. upstream call with timeout (retries and failover in Phase 5)
 Every request is logged, including every rejection.
 """
 
@@ -24,9 +25,11 @@ from app.costs import compute_cost_nano
 from app.errors import (
     GatewayError,
     authentication_error,
+    budget_exhausted,
     error_response,
     invalid_request,
     model_not_allowed,
+    rate_limited,
 )
 from app.headers import prism_headers
 from app.providers import Usage
@@ -129,6 +132,12 @@ async def chat_completions(request: Request):
         ctx.route = resolve_route(state.config, state.pricing, body["model"], body["messages"])
         if body["model"] not in key.allowlist:
             raise model_not_allowed(body["model"])
+        decision = state.limiter.acquire(key.virtual_key, key.rpm)  # atomic: check and record together
+        if not decision.allowed:
+            raise rate_limited(key.rpm, decision.retry_after_s)
+        spent = await store.month_spent_nano(key.virtual_key, ctx.created_at.strftime("%Y-%m"))
+        if spent >= key.monthly_budget_nano:  # admit while budget remains; see "overshoot" in the README
+            raise budget_exhausted(key.monthly_budget_nano)
         params = {k: body[k] for k in PASS_THROUGH if k in body}
         streaming = bool(body.get("stream"))
         upstream_started = time.monotonic()

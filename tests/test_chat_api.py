@@ -2,12 +2,9 @@
 
 import asyncio
 
-import httpx
 import pytest
 
 from app.main import app
-from app.providers import ProviderRegistry
-from app.providers.fake import FakeAdapter
 
 SEARCH = "prism-sk-search-1a2b3c"  # allowlist: fast
 RESEARCH = "prism-sk-research-4d5e6f"  # allowlist: fast, smart, auto
@@ -19,20 +16,6 @@ EXPECTED_COST_NANO = 3_750
 
 def auth(key: str) -> dict:
     return {"Authorization": f"Bearer {key}"}
-
-
-@pytest.fixture
-def fakes():
-    return {"alpha": FakeAdapter("alpha"), "beta": FakeAdapter("beta")}
-
-
-@pytest.fixture
-async def client(fakes):
-    async with app.router.lifespan_context(app):
-        app.state.providers = ProviderRegistry(dict(fakes))
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as c:
-            yield c
 
 
 async def logs(client, key=None, limit=50):
