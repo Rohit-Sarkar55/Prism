@@ -10,7 +10,7 @@ here is free and reproducible. Providers sit behind an adapter, so real ones can
 touching the core.
 
 ## Contents
-[Quick start](#quick-start) · [Demo keys](#seeded-demo-keys) · [API](#api) · [Architecture](#architecture) ·
+[Quick start](#quick-start) · [Demo keys](#seeded-demo-keys) · [Reproduce the demo](#reproduce-the-demo) · [API](#api) · [Architecture](#architecture) ·
 [How it works](#how-it-works) · [Configuration](#configuration) · [Verification](#verification) ·
 [Known limitations](#known-limitations) · [Windows notes](#windows-notes)
 
@@ -70,6 +70,32 @@ These come from `data/seed_keys.json` and are loaded unchanged on every start (u
 `free-tier` is for showing the rate limit. The admin token is `demo-admin-token` unless you set
 `PRISM_ADMIN_TOKEN`. Virtual keys are stored in plain text: the seed values are public demo credentials
 and the scripts need them as given.
+
+## Reproduce the demo
+
+Everything runs locally against the mock providers. In one terminal, start the stack on a clean database; in
+another, run the narrated demo:
+
+```powershell
+python -m tools.dev_stack --fresh-db     # terminal 1: leave it running
+python -m tools.demo                     # terminal 2: press Enter between steps; add --no-pause to run straight through
+```
+
+Open `http://127.0.0.1:8080/console` next to it (admin token `demo-admin-token`) and watch it fill in. The demo
+walks through six things, in this order, and prints the evidence for each:
+
+1. **Streaming**: tokens arrive one by one (time to first token, chunk count, `[DONE]`), then the log row with its cost.
+2. **Smart routing**: `auto` sends an easy question to the cheap model, a hard one to the strong model, and a long
+   input with a trivial question to the cheap model, each with the reason it was logged.
+3. **Semantic cache**: a repeat is a free hit, a paraphrase is a hit, a look-alike with a different intent is a
+   miss, and the same prompt from another team is a real, paid miss.
+4. **Budget rejection**: the `budget-demo` key gets one request, then a 402.
+5. **Rate limiting**: the `free-tier` key is cut off with 429 and `Retry-After` at its 10 requests per minute.
+6. **Live failover**: `alpha` is taken down, then made 3 seconds slow, while the gateway runs; `beta` serves with
+   `x-prism-fallback: true`, and `alpha` takes over again once restored.
+
+The demo needs an unused database (an unspent budget, a free rate-limit window), so restart the stack with
+`--fresh-db` before each run. It checks this first and tells you what to do if the database is not clean.
 
 ## API
 
@@ -159,6 +185,7 @@ client ──▶ authenticate ─▶ validate ─▶ resolve alias ─▶ allowl
 | `tools/routing_eval.py`, `tools/cache_eval.py` | one-command evals for the two AI decisions |
 | `tools/dev_stack.py` | starts the mock providers and the gateway together and stops them cleanly |
 | `tools/verify.py` | runs every verification check against a private stack and writes `VERIFICATION.md` |
+| `tools/demo.py` | the narrated demo for the video: streaming, routing, cache, budget, rate limit, failover |
 
 State is SQLite in WAL mode: `virtual_keys`, `usage_monthly`, `request_logs`, `cache_entries`. Price table,
 providers and aliases are loaded from `data/` at startup. Rate-limiter and provider-health state live in memory.

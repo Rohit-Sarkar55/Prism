@@ -264,6 +264,24 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
   of bar (checked by rendering five budget cases in jsdom). Ctrl+C stopping all three services on Windows is
   now CONFIRMED (no listener left on 8080, 9001, 9002). Still pending from the user: the output of
   `python -m tools.verify` run on their machine.
+- USER'S OWN VERIFICATION PASSED (`python -m tools.verify`, Windows, Python 3.14): all graded checks passed,
+  293 tests, smoke 17/0 failed, budget, failover (down, restored, slow), no over-admission (10 of limit 10),
+  accounting reconciled, cache isolation and persistence, routing and cache evals. Gateway latency from the
+  log: 48 ms median total, 12 ms overhead. The user's `VERIFICATION.md` (their machine) is the deliverable.
+- DEMO DONE: `tools/demo.py` (`python -m tools.demo [--no-pause] [--force]`): six narrated steps in the order of
+  the brief's demo checklist (streaming, auto routing, semantic cache + tenant isolation, budget rejection,
+  rate limit, live failover), pausing for Enter between steps, plain ASCII output. It refuses unless the stack
+  runs on a CLEAN database (`dev_stack --fresh-db`) because the story needs an unspent budget and a free
+  rate-limit window. Verified for real in the sandbox: full run, then a second run correctly refused. Two
+  narration lines that overclaimed were found by reading the output and fixed (step 5 said "used 2" when it was
+  1, now computed; it also claimed a concurrent burst while sending sequential requests).
+- PYTHON 3.11 PROMISE: the README says 3.11+. The formatter rewrote two f-strings into a form valid only on 3.12+
+  (a string inside an f-string field reusing the outer quote). Found with the tokenizer, fixed, and
+  `tests/test_python_compat.py` now guards it (meaningful on 3.12+; the project was never run on 3.11).
+  300 tests pass in the sandbox.
+- REMAINING FOR THE USER: copy the new files, commit and push (including VERIFICATION.md), then record the
+  explainer video (use the demo command and the console). Submission checklist: public repo link, README,
+  seeded keys + reproduce instructions (README section "Reproduce the demo"), VERIFICATION.md, video.
 - SANDBOX LESSONS (for whoever drives the sandbox): never `kill` from stale PID files (PIDs get reused, one
   killed the tool's own shell), never `pkill -f` a pattern that appears in the same command line, find a
   process by its exact command instead.
