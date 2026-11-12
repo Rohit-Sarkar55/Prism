@@ -147,7 +147,7 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
   length-only baseline, one-command eval with per-case accuracy.
 - [x] **Phase 7: Semantic cache (~1.5 days).** (done, verified live) Embeddings, cosine threshold, per-key (and
   per-model) scoping, tuned on paraphrase pairs, hit rate tracking.
-- [ ] **Phase 8: Logs, usage API, console (~1.5 days).** Full request log, usage summary
+- [x] **Phase 8: Logs, usage API, console (~1.5 days).** (done, see status) Full request log, usage summary
   API, simple console. Numbers must match API and raw logs.
 - [ ] **Phase 9: Verification and delivery (~2 days).** Unit tests, smoke, load test,
   routing eval, verification report, README, demo video.
@@ -203,16 +203,95 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
     ("price"/"cost", "money back"/"refund") miss. A miss costs money, a false hit serves a wrong answer,
     so the matcher errs towards misses. The brief accepts this when the provided pair A hits and the
     near-miss does not (both verified). Upgrade path: a real embedding model behind the same two methods.
-- Not yet done: Phase 8 (ops console), README, verification report, demo video, and the unresolved
-  latency question from Phase 4 (average 1005 ms on the user's machine vs 190-390 ms here; suspected
-  `localhost` resolving to IPv6 first; compare `Measure-Command` on `localhost` vs `127.0.0.1`; fix
-  would be `127.0.0.1` in the two `base_url` values of data/gateway_config.sample.json).
-- Next: Phase 8, the ops console: ONE static HTML page (served by the gateway, e.g. `GET /console`,
-  no build step) showing usage by key, recent requests (with status, provider, cache, fallback,
-  cost, latency, route_reason) and the cache hit rate, plus provider health. It calls the existing
-  admin API with the admin token (`GET /admin/usage`, `/admin/logs`, `/admin/cache/stats`,
-  `/admin/providers`). The brief says polish is not graded. Then README, then the verification
-  report, then the demo script.
+- Phase 8 DONE in code (verify tests + push): the ops console. New `app/static/console.html` (ONE static
+  page, vanilla JS, no build step, no external resources), `app/routes/console.py` (`GET /console`, loads
+  without a token), `GET /admin/keys` (every key with limits, this month's spend, budget used %),
+  `Store.keys_overview`. 265 tests pass in the sandbox. The page shows tiles (requests, spend, cache hit
+  rate, saved by cache, provider health), usage by key with a budget bar (can exceed 100%: overshoot is
+  documented), cache stats per key, provider health, and the 30 most recent requests (filterable by key,
+  with status, provider, cache, fallback, retries, cost, latency and the routing / cache note). It
+  auto-refreshes every 5 s; the admin token is typed in and kept in sessionStorage only (never in the
+  page or a URL).
+- SECURITY of the console: request logs hold text callers control (the model name they sent), so the page
+  builds its DOM from text nodes only (a test forbids innerHTML, outerHTML, eval, document.write and
+  friends), and the server sets a per-request nonce CSP (`default-src 'none'; script-src 'nonce-...';
+  style-src 'nonce-...'; connect-src 'self'; frame-ancestors 'none'`), `Cache-Control: no-store` and
+  `nosniff`. A bug fixed along the way: the admin token check used `secrets.compare_digest` on strings,
+  which raises TypeError (HTTP 500) for any non-ASCII token; it now compares bytes, so a bad token is
+  always a 401 (a test covers every admin endpoint).
+- VERIFIED LIVE for the console: the real page JavaScript was run in jsdom against the live gateway with
+  varied traffic (hits, misses, a fallback, a budget rejection, 429s, a bad key, and a request whose model
+  name was `<img src=x onerror=alert(1)>`). Every table drew real data; the hostile name appeared as plain
+  text with 0 <img> elements and 0 onerror attributes; a wrong token showed "The admin token was not
+  accepted." and drew nothing; no token showed a prompt. NOT verified: it was never opened in a real
+  browser (no browser in the sandbox), so layout, dark mode and CSP enforcement are untested. jsdom does
+  not enforce CSP.
+- README DONE: `README.md` at the project root (quick start, seeded keys, API with the full header and
+  error tables, architecture, how each subsystem works and WHY, configuration, verification commands with
+  the honest eval results, known limitations, Windows notes). `tests/test_readme.py` (12 tests) fails if the
+  README drifts from the code: every route, `PRISM_*` setting, file path, seeded key, error status, default
+  number and eval number it quotes is checked. It was mutation-tested (5 deliberate README errors, all
+  caught). 277 tests pass in the sandbox. The README quotes NO smoke-test or load-test numbers: those belong
+  in the verification report and must come from the user's own runs.
+- DEV STACK DONE: `tools/dev_stack.py` (`python -m tools.dev_stack [--fresh-db]`) starts alpha, beta and the
+  gateway, waits for each `/health`, logs to `.prism-logs/` (add that folder to `.gitignore`), refuses to start
+  if a port is taken (a stale stack serves OLD code and config), and stops everything on Ctrl+C, SIGTERM or a
+  closed terminal (signal handlers installed on purpose: a plain kill used to orphan the children, and a
+  launcher started as a background job inherits "ignore SIGINT"). Verified for real: all three up, smoke
+  test 17/17 through it, a second copy refuses, SIGINT and SIGTERM both leave no stray process, and the
+  database persists across a restart. 284 tests pass in the sandbox. The user hit "mocks not running" three
+  times (502s, 2.3 s bursts = two dead providers at ~1 s connect timeout each); this exists to end that.
+- VERIFY DONE: `tools/verify.py` (`python -m tools.verify [--skip-tests] [--output PATH]`) starts a private
+  stack on a TEMPORARY database (the user's prism.db is never touched) and runs: the pytest suite, the provided
+  smoke test, a budget rejection, three failover drills (down, restored, 3 s slow), the load test with an exact
+  reconciliation against `/admin/usage`, a latency summary from the request log (`latency_ms`, `upstream_ms`,
+  their difference), cache tenant isolation plus persistence across a gateway restart, the routing eval and the
+  cache eval; then writes `VERIFICATION.md` (summary table, raw output of each step, how to read the latency
+  numbers, what the run does NOT show). `dev_stack` gained `start_stack`, `restart_gateway`, `ensure_ports_free`,
+  `StackError` for this. 293 tests pass in the sandbox; a full real run passed all 9 graded checks (twice).
+  The report MUST be generated on the USER'S machine (`python -m tools.verify`): one generated on Linux in the
+  sandbox describes the sandbox and was deliberately not delivered.
+- USER'S RESULTS SO FAR (Windows, real runs): smoke test 17 passed / 1 warning (pair B) / 0 failed; load test 10
+  accepted of limit 10, 20 rate limited; gateway `latency_ms` 69-77 ms with `upstream_ms` 25-62 ms after the
+  provider URLs became 127.0.0.1 (it was ~305 ms through `localhost`); the load-test script reported 313 ms
+  average, the gap being client-side start-up (about 200 ms even on a healthy Linux setup). 272 tests passed
+  there before test_readme.py was added (the user had not copied it yet). Launcher confirmed starting on
+  Windows; Ctrl+C stopping all three on Windows was NOT yet confirmed.
+- CONSOLE SEEN IN A REAL BROWSER (user's screenshot, Windows): layout, colors, pills and column alignment all
+  fine, and every figure on screen cross-checked (tiles equal the table sums, 2 hits / 16 misses = 11.1%, 18
+  requests served = 2 hits + 16 misses). One flaw found and fixed: a key that had spent $0.000174 of $5 showed
+  "0% of $5.0000" with an empty bar (the API rounds to 0.1%); any nonzero spend now shows "<0.1%" and a sliver
+  of bar (checked by rendering five budget cases in jsdom). Ctrl+C stopping all three services on Windows is
+  now CONFIRMED (no listener left on 8080, 9001, 9002). Still pending from the user: the output of
+  `python -m tools.verify` run on their machine.
+- SANDBOX LESSONS (for whoever drives the sandbox): never `kill` from stale PID files (PIDs get reused, one
+  killed the tool's own shell), never `pkill -f` a pattern that appears in the same command line, find a
+  process by its exact command instead.
+- OPEN: the latency question (the load test shows ~730-940 ms average on the user's Windows machine; ~257 ms
+  on the sandbox). What has been established so far:
+  * The gateway adds little: gateway overhead (`latency_ms - upstream_ms`) was 6-28 ms under 10 concurrent
+    requests on the user's machine. Quote the gateway's own `latency_ms` from the request log, not the
+    script's figure.
+  * The provided load test's own latency figure includes ~200 ms of client-side cost even on a healthy
+    Linux setup (script 257 ms vs gateway 20-75 ms for the same requests; likely one-time `urllib` start-up
+    on each thread's first request). Not yet confirmed on Windows: the user has NOT yet run the `urllib`
+    cold-vs-warm probe.
+  * The user's table showed `upstream_ms` ~305 ms for an INSTANT mock (healthy baseline here: 9-53 ms). It
+    came from a run that may have used the OLD `localhost` provider URLs, because the gateway may not have
+    been restarted after the config change. A later paste of the same query returned the IDENTICAL ten rows
+    (same timestamps, 16:31:33), so it still does not show a post-restart run. A clean re-measure needs:
+    restart gateway, note a timestamp, run the load test, then list only rows newer than that timestamp.
+  * Wrong explanations already ruled out (do not repeat them): "the load-test client's localhost is slow
+    because of IPv6" (Python resolves `localhost` to [v4, v6] and connects in 2-21 ms); "curl's 215 ms for
+    localhost" is a curl effect (it prefers IPv6, waits 200 ms), not Python's.
+  * The sample config now points both providers at 127.0.0.1 (a precaution; it did not change the client
+    figure by much).
+- Not yet done: the verification report (run `python -m tools.verify` on the user's machine, then commit
+  smoke output, load test, over-admission, accounting totals vs the usage API, routing eval, cache eval,
+  latency from the log), and the demo script. The demo script is best built as `tools/demo.py`: one command
+  that narrates streaming, auto routing, a cache miss then hit then paraphrase hit then near-miss, tenant
+  isolation, the rate limit, budget rejection, and failover (set alpha down via POST /admin/config on the
+  mock, then restore). Do not add it to the README until it exists (the README test checks file names).
 
 ### Phase 7 design decisions (feed the README)
 

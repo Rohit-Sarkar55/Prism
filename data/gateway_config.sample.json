@@ -1,8 +1,8 @@
 {
   "_comment": "Sample gateway configuration: a provider registry, model aliases, and fallback chains. Adapt the shape to your design - this shows one reasonable structure, not the required one.",
   "providers": [
-    { "name": "alpha", "base_url": "http://localhost:9001/v1", "api_key": "mock-key-alpha" },
-    { "name": "beta",  "base_url": "http://localhost:9002/v1", "api_key": "mock-key-beta" }
+    { "name": "alpha", "base_url": "http://127.0.0.1:9001/v1", "api_key": "mock-key-alpha" },
+    { "name": "beta",  "base_url": "http://127.0.0.1:9002/v1", "api_key": "mock-key-beta" }
   ],
   "model_aliases": {
     "fast":  { "primary": "alpha-small", "fallbacks": ["beta-small"] },

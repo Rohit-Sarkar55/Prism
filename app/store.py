@@ -266,6 +266,23 @@ class Store:
         row = await cur.fetchone()
         return row["cost_nano"] if row else 0
 
+    async def keys_overview(self, month: str) -> list[dict]:
+        """Every key with its limits and this month's usage (for the console's usage-by-key table)."""
+        cur = await self.db.execute(
+            """
+            SELECT k.virtual_key, k.team, k.status, k.monthly_budget_nano, k.rpm, k.tpm, k.model_allowlist,
+                   k.cache_enabled, k.cache_threshold,
+                   COALESCE(u.requests, 0) AS requests, COALESCE(u.prompt_tokens, 0) AS prompt_tokens,
+                   COALESCE(u.completion_tokens, 0) AS completion_tokens, COALESCE(u.cost_nano, 0) AS cost_nano,
+                   COALESCE(u.cache_hits, 0) AS cache_hits
+            FROM virtual_keys k
+            LEFT JOIN usage_monthly u ON u.virtual_key = k.virtual_key AND u.month = ?
+            ORDER BY k.team
+            """,
+            (month,),
+        )
+        return [dict(row) for row in await cur.fetchall()]
+
     async def month_usage(self, virtual_key: str, month: str) -> dict | None:
         cur = await self.db.execute(
             "SELECT * FROM usage_monthly WHERE virtual_key = ? AND month = ?", (virtual_key, month)

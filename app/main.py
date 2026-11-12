@@ -9,7 +9,7 @@ from app.errors import GatewayError, error_response
 from app.health import ProviderHealth
 from app.providers import ProviderRegistry
 from app.ratelimit import SlidingWindowLimiter
-from app.routes import admin, chat
+from app.routes import admin, chat, console
 from app.seed import load_gateway_config, load_pricing, seed_keys, validate_config
 from app.store import Store
 from app.upstream import RetryPolicy, Upstream
@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Prism", lifespan=lifespan)
 app.include_router(chat.router)
 app.include_router(admin.router)
+app.include_router(console.router)
 
 
 @app.exception_handler(GatewayError)

@@ -1,5 +1,6 @@
 """Admin plane: protected by a simple demo token (Authorization: Bearer <admin token>)."""
 
+import json
 import secrets
 from datetime import UTC, date, datetime, timedelta
 
@@ -14,7 +15,9 @@ router = APIRouter(prefix="/admin")
 def require_admin(request: Request) -> None:
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     expected = request.app.state.settings.admin_token
-    if scheme.lower() != "bearer" or not secrets.compare_digest(token.strip(), expected):
+    # Compare BYTES: compare_digest on two str values raises TypeError for any non-ASCII character,
+    # which would turn a garbage token into a 500 instead of a 401.
+    if scheme.lower() != "bearer" or not secrets.compare_digest(token.strip().encode(), expected.encode()):
         raise authentication_error()
 
 
@@ -25,6 +28,36 @@ def _parse_day(value: str | None, default: date, name: str) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise invalid_request(f"'{name}' must be a date like 2026-11-30") from exc
+
+
+@router.get("/keys")
+async def keys(request: Request):
+    """All keys with their limits and this month's spend: the console's usage-by-key table."""
+    require_admin(request)
+    month = datetime.now(UTC).strftime("%Y-%m")
+    out = []
+    for row in await request.app.state.store.keys_overview(month):
+        budget = row["monthly_budget_nano"]
+        out.append(
+            {
+                "key": row["virtual_key"],
+                "team": row["team"],
+                "status": row["status"],
+                "monthly_budget_usd": float(nano_to_usd_str(budget)),
+                "spent_usd": float(nano_to_usd_str(row["cost_nano"])),
+                "spent_nano": row["cost_nano"],
+                "budget_used_pct": round(row["cost_nano"] / budget * 100, 1) if budget else 0.0,
+                "requests": row["requests"],
+                "prompt_tokens": row["prompt_tokens"],
+                "completion_tokens": row["completion_tokens"],
+                "cache_hits": row["cache_hits"],
+                "rpm": row["rpm"],
+                "model_allowlist": json.loads(row["model_allowlist"]),
+                "cache_enabled": bool(row["cache_enabled"]),
+                "cache_threshold": row["cache_threshold"],
+            }
+        )
+    return {"month": month, "keys": out}
 
 
 @router.get("/usage")

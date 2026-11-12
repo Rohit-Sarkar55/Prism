@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism console</title>
+<style nonce="__NONCE__">
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --mute:#667085; --line:#e4e7ec; --accent:#5b3df5;
+          --ok:#067647; --okbg:#e7f6ee; --hit:#175cd3; --hitbg:#e8f0fe; --warn:#b54708; --warnbg:#fef3e2;
+          --bad:#b42318; --badbg:#fdecea; --idle:#475467; --idlebg:#eef0f3; --bar:#d0d5dd; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1115; --card:#171a21; --ink:#e8eaee; --mute:#98a2b3; --line:#272b34; --accent:#8b7bff;
+            --ok:#47cd89; --okbg:#0f2a1d; --hit:#84adff; --hitbg:#14213d; --warn:#fdb022; --warnbg:#33230a;
+            --bad:#f97066; --badbg:#3a1512; --idle:#98a2b3; --idlebg:#232733; --bar:#344054; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  /* The header spans the window but its contents line up with <main> (max 1280px, centred), so on a wide
+     window the title, token box and tables share one left and right edge instead of drifting apart. */
+  header { display:flex; flex-wrap:wrap; gap:12px 20px; align-items:center; padding:14px max(24px, calc((100% - 1280px) / 2 + 24px)); background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
+  h1 { font-size:18px; margin:0; } h1 span { color:var(--accent); }
+  .sub { color:var(--mute); }
+  header form { display:flex; gap:8px; margin-left:auto; }
+  input, select, button { font:inherit; color:var(--ink); background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+  button { background:var(--accent); color:#fff; border-color:var(--accent); cursor:pointer; }
+  label { color:var(--mute); display:flex; gap:6px; align-items:center; }
+  main { padding:20px 24px 48px; max-width:1280px; margin:0 auto; }
+  #banner { display:none; margin:0 0 16px; padding:10px 14px; border-radius:8px; background:var(--warnbg); color:var(--warn); }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:20px; }
+  .tile, section { background:var(--card); border:1px solid var(--line); border-radius:12px; }
+  .tile { padding:14px 16px; } .tile .v { font-size:24px; font-weight:650; margin-top:2px; } .tile .l { color:var(--mute); font-size:12px; text-transform:uppercase; letter-spacing:.04em; } .tile .n { color:var(--mute); font-size:12px; }
+  section { padding:14px 16px 6px; margin-bottom:16px; overflow-x:auto; }
+  h2 { font-size:14px; margin:0 0 10px; display:flex; gap:12px; align-items:center; }
+  table { width:100%; border-collapse:collapse; margin-bottom:10px; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--mute); font-weight:600; font-size:12px; } tr:last-child td { border-bottom:0; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+  .b-ok { color:var(--ok); background:var(--okbg); } .b-hit { color:var(--hit); background:var(--hitbg); }
+  .b-warn { color:var(--warn); background:var(--warnbg); } .b-bad { color:var(--bad); background:var(--badbg); } .b-idle { color:var(--idle); background:var(--idlebg); }
+  .bar { width:110px; height:8px; background:var(--bar); border-radius:99px; overflow:hidden; display:inline-block; vertical-align:middle; margin-right:8px; }
+  .bar i { display:block; height:100%; background:var(--ok); } .bar.warn i { background:var(--warn); } .bar.over i { background:var(--bad); }
+  .empty { color:var(--mute); padding:8px 10px 14px; }
+  .reason { max-width:340px; overflow:hidden; text-overflow:ellipsis; color:var(--mute); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Prism <span>console</span></h1>
+  <span class="sub">LLM gateway operations</span>
+  <label><input type="checkbox" id="auto" checked> auto-refresh (5s)</label>
+  <span class="sub" id="updated" aria-live="polite">not connected</span>
+  <form id="auth">
+    <input type="password" id="token" placeholder="admin token" autocomplete="off" aria-label="admin token">
+    <button type="submit">Connect</button>
+  </form>
+</header>
+<main>
+  <div id="banner" role="alert"></div>
+  <div class="tiles" id="tiles"></div>
+  <section><h2>Usage by key <span class="sub" id="month"></span></h2><div id="keys"></div></section>
+  <section><h2>Cache</h2><div id="cache"></div></section>
+  <section><h2>Providers</h2><div id="providers"></div></section>
+  <section>
+    <h2>Recent requests
+      <select id="filter" aria-label="filter by key"><option value="">all keys</option></select>
+    </h2>
+    <div id="logs"></div>
+  </section>
+</main>
+
+<script nonce="__NONCE__">
+"use strict";
+// Every value that came from the API is written with textContent, never as HTML: request logs hold text
+// that callers control (the model name they sent), and this page is an admin page.
+const $ = (id) => document.getElementById(id);
+let token = sessionStorage.getItem("prismAdminToken") || "";
+let timer = null;
+let teams = {};
+
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) { if (k === "class") node.className = v; else node.setAttribute(k, v); }
+  for (const c of children) node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return node;
+}
+const usd = (n) => (n === 0 ? "$0" : n < 0.01 ? "$" + n.toFixed(6) : "$" + n.toFixed(4));
+const pct = (n) => (n * 100).toFixed(1) + "%";
+const int = (n) => Number(n).toLocaleString();
+const short = (key) => (key ? key.slice(0, 8) + "…" + key.slice(-4) : "—");
+
+// Badge classes come from fixed tables, never from response text.
+function statusClass(status) {
+  if (status === "ok") return "b-ok";
+  if (status === "cache_hit") return "b-hit";
+  if (String(status).startsWith("rejected")) return "b-warn";
+  if (status === "upstream_error" || status === "stream_error") return "b-bad";
+  return "b-idle";
+}
+const badge = (text, cls) => el("span", { class: "badge " + cls }, text);
+
+function table(columns, rows, emptyText) {
+  if (!rows.length) return el("div", { class: "empty" }, emptyText);
+  const head = el("tr", {}, ...columns.map((c) => el("th", { class: c.num ? "num" : "" }, c.label)));
+  const body = rows.map((r) => el("tr", {}, ...columns.map((c) => {
+    const cell = c.cell(r);
+    return el("td", { class: (c.num ? "num " : "") + (c.mono ? "mono" : "") }, cell);
+  })));
+  return el("table", {}, el("thead", {}, head), el("tbody", {}, ...body));
+}
+function replace(id, node) { $(id).replaceChildren(node); }
+
+function budgetCell(k) {
+  const used = k.budget_used_pct;
+  const spent = k.spent_nano > 0;
+  // The API rounds to 0.1%, so a key that has spent a little would read "0%" with an empty bar, which looks
+  // like its spend is not counted. Any nonzero spend shows "<0.1%" and a sliver of bar.
+  const label = used === 0 && spent ? "<0.1%" : used + "%";
+  const cls = used >= 100 ? "bar over" : used >= 70 ? "bar warn" : "bar";
+  const fill = el("i", {}); fill.style.width = Math.min(Math.max(used, spent ? 2 : 0), 100) + "%";
+  return el("span", {}, el("span", { class: cls }, fill), `${label} of ${usd(k.monthly_budget_usd)}`);
+}
+
+function render(keys, cache, providers, logs) {
+  teams = Object.fromEntries(keys.keys.map((k) => [k.key, k.team]));
+  const sel = $("filter"), current = sel.value;
+  sel.replaceChildren(el("option", { value: "" }, "all keys"), ...keys.keys.map((k) => el("option", { value: k.key }, k.team)));
+  sel.value = current;
+
+  const totalReq = keys.keys.reduce((a, k) => a + k.requests, 0);
+  const totalSpend = keys.keys.reduce((a, k) => a + k.spent_usd, 0);
+  const healthy = Object.values(providers.providers).filter((p) => p.state === "healthy").length;
+  const nProv = Object.keys(providers.providers).length;
+  const o = cache.overall;
+  const tile = (label, value, note) => el("div", { class: "tile" }, el("div", { class: "l" }, label), el("div", { class: "v" }, value), el("div", { class: "n" }, note || "\u00a0"));
+  $("tiles").replaceChildren(
+    tile("Requests served", int(totalReq), "this month"),
+    tile("Spend", usd(totalSpend), "this month"),
+    tile("Cache hit rate", pct(o.hit_rate), `${int(o.hits)} hits / ${int(o.misses)} misses`),
+    tile("Saved by cache", usd(o.saved_usd), `${int(o.entries)} entries stored`),
+    tile("Providers", `${healthy}/${nProv}`, healthy === nProv ? "all healthy" : "degraded"),
+  );
+
+  $("month").textContent = keys.month;
+  replace("keys", table([
+    { label: "Team", cell: (k) => k.team },
+    { label: "Key", mono: true, cell: (k) => short(k.key) },
+    { label: "Requests", num: true, cell: (k) => int(k.requests) },
+    { label: "Tokens in / out", num: true, cell: (k) => `${int(k.prompt_tokens)} / ${int(k.completion_tokens)}` },
+    { label: "Spend", num: true, cell: (k) => usd(k.spent_usd) },
+    { label: "Budget used", cell: budgetCell },
+    { label: "Cache hits", num: true, cell: (k) => int(k.cache_hits) },
+    { label: "Limit", num: true, cell: (k) => `${k.rpm} rpm` },
+    { label: "Models", cell: (k) => k.model_allowlist.join(", ") },
+  ], keys.keys, "No keys."));
+
+  replace("cache", table([
+    { label: "Team", cell: (r) => teams[r.key] || short(r.key) },
+    { label: "Cache", cell: (r) => { const k = keys.keys.find((x) => x.key === r.key); return k && k.cache_enabled ? badge(`on @ ${k.cache_threshold}`, "b-ok") : badge("off", "b-idle"); } },
+    { label: "Hits", num: true, cell: (r) => int(r.hits) },
+    { label: "Misses", num: true, cell: (r) => int(r.misses) },
+    { label: "Hit rate", num: true, cell: (r) => pct(r.hit_rate) },
+    { label: "Entries", num: true, cell: (r) => int(r.entries) },
+    { label: "Saved", num: true, cell: (r) => usd(r.saved_usd) },
+  ], cache.by_key, "No cache activity yet.") );
+
+  replace("providers", table([
+    { label: "Provider", cell: ([name]) => name },
+    { label: "State", cell: ([, p]) => badge(p.state, p.state === "healthy" ? "b-ok" : "b-bad") },
+    { label: "Recent calls", num: true, cell: ([, p]) => int(p.recent_calls) },
+    { label: "Recent error rate", num: true, cell: ([, p]) => pct(p.recent_error_rate) },
+  ], Object.entries(providers.providers), "No providers."));
+
+  replace("logs", table([
+    { label: "Time", cell: (l) => new Date(l.created_at).toLocaleTimeString() },
+    { label: "Team", cell: (l) => teams[l.virtual_key] || "—" },
+    { label: "Asked for", mono: true, cell: (l) => l.requested_model || "—" },
+    { label: "Served by", mono: true, cell: (l) => (l.resolved_provider ? `${l.resolved_provider}/${l.resolved_model}` : l.cache === "hit" ? "cache" : "—") },
+    { label: "Status", cell: (l) => badge(l.status, statusClass(l.status)) },
+    { label: "Cache", cell: (l) => l.cache },
+    { label: "Fallback", cell: (l) => (l.fallback ? badge("fallback", "b-warn") : "") },
+    { label: "Retries", num: true, cell: (l) => l.retries },
+    { label: "Cost", num: true, cell: (l) => usd(Number(l.cost_usd)) },
+    { label: "Latency", num: true, cell: (l) => (l.latency_ms == null ? "—" : l.latency_ms + " ms") },
+    { label: "Routing / cache note", cell: (l) => { const s = el("span", { class: "reason", title: l.route_reason || "" }, l.route_reason || ""); return s; } },
+  ], logs.logs, "No requests yet."));
+}
+
+async function api(path) {
+  const res = await fetch(path, { headers: { Authorization: "Bearer " + token } });
+  if (res.status === 401) throw new Error("The admin token was not accepted.");
+  if (!res.ok) throw new Error(`${path} returned HTTP ${res.status}`);
+  return res.json();
+}
+
+async function refresh() {
+  if (!token) return;
+  try {
+    const filter = $("filter").value;
+    const logsPath = "/admin/logs?limit=30" + (filter ? "&key=" + encodeURIComponent(filter) : "");
+    const [keys, cache, providers, logs] = await Promise.all([api("/admin/keys"), api("/admin/cache/stats"), api("/admin/providers"), api(logsPath)]);
+    render(keys, cache, providers, logs);
+    $("banner").style.display = "none";
+    $("updated").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (err) {
+    $("banner").textContent = err.message;
+    $("banner").style.display = "block";
+    if (err.message.startsWith("The admin token")) { sessionStorage.removeItem("prismAdminToken"); token = ""; stop(); }
+  }
+}
+function start() { stop(); if ($("auto").checked) timer = setInterval(refresh, 5000); }
+function stop() { if (timer) clearInterval(timer); timer = null; }
+
+$("auth").addEventListener("submit", (e) => {
+  e.preventDefault();
+  token = $("token").value.trim();
+  if (!token) return;
+  sessionStorage.setItem("prismAdminToken", token);
+  $("token").value = "";
+  refresh(); start();
+});
+$("auto").addEventListener("change", start);
+$("filter").addEventListener("change", refresh);
+
+if (token) { refresh(); start(); } else { $("banner").textContent = "Enter the admin token to load data."; $("banner").style.display = "block"; }
+</script>
+</body>
+</html>
