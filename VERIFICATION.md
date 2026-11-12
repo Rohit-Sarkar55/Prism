@@ -1,6 +1,6 @@
 # Prism verification report
 
-Generated 2026-11-12 20:03 UTC by `python -m tools.verify` on Windows-11-10.0.26200-SP0, Python 3.14.7.
+Generated 2026-11-12 20:56 UTC by `python -m tools.verify` on Windows-11-10.0.26200-SP0, Python 3.14.7.
 Every number below was produced by that run, against a fresh private stack: an empty temporary database,
 the two mock providers and the gateway. Nothing is copied from an earlier run.
 
@@ -8,13 +8,13 @@ the two mock providers and the gateway. Nothing is copied from an earlier run.
 
 | # | Check | Result | Detail |
 |---|---|---|---|
-| 1 | Automated tests | **PASS** | 293 passed in 19.97s |
+| 1 | Automated tests | **PASS** | 304 passed in 19.55s |
 | 2 | Provided smoke test | **PASS** | 17 passed, 1 warnings, 0 failed |
 | 3 | Budget rejection | **PASS** | first request 200, second 402 budget_exceeded |
 | 4 | Provider failover | **PASS** | down, recovery and slow provider all handled |
 | 5 | Load test: no over-admission | **PASS** | 10 accepted of a limit of 10, 20 rate limited, 0 other, out of 30 |
 | 6 | Accounting: usage API equals the client's totals | **PASS** | requests, tokens and cost reconcile |
-| 7 | Latency summary | **info** | gateway median 48 ms total, 12 ms overhead |
+| 7 | Latency summary | **info** | gateway median 80 ms total, 20 ms overhead |
 | 8 | Cache tenant isolation and persistence | **PASS** | another key got a real miss, and the owner's entry survived a restart |
 | 9 | Routing eval (auto) | **PASS** | the router beats the length-only baseline on both sets |
 | 10 | Cache matcher eval | **PASS** | no false hits at the strictest threshold (0.92) |
@@ -25,15 +25,15 @@ the two mock providers and the gateway. Nothing is copied from an earlier run.
 
 ### 1. Automated tests  (PASS)
 
-293 passed in 19.97s
+304 passed in 19.55s
 
 ```text
-........................................................................ [ 24%]
-........................................................................ [ 49%]
-........................................................................ [ 73%]
-........................................................................ [ 98%]
-.....                                                                    [100%]
-293 passed in 19.97s
+........................................................................ [ 23%]
+........................................................................ [ 47%]
+........................................................................ [ 71%]
+........................................................................ [ 94%]
+................                                                         [100%]
+304 passed in 19.55s
 ```
 
 ### 2. Provided smoke test  (PASS)
@@ -47,13 +47,13 @@ the two mock providers and the gateway. Nothing is copied from an earlier run.
   PASS  body has choices and usage
   PASS  header x-prism-provider present  (alpha/alpha-small)
   PASS  header x-prism-cache present  (miss)
-  PASS  header x-prism-cost-usd present  (0.000013500)
+  PASS  header x-prism-cost-usd present  (0.000011700)
   PASS  first request is a cache miss  (miss)
 
 [2] Streaming
   PASS  returns 200  (got 200)
   PASS  content-type is text/event-stream  (text/event-stream; charset=utf-8)
-  PASS  received multiple SSE chunks  (19 data lines)
+  PASS  received multiple SSE chunks  (20 data lines)
   PASS  stream ends with [DONE]
 
 [3] Auth
@@ -108,13 +108,13 @@ Bursting 30 requests at concurrency 10 ...
 Burst finished in 0.3s
   accepted (200):      10
   rate limited (429):  20
-  latency avg/p95 ms:  257 / 312
+  latency avg/p95 ms:  239 / 323
 
 Client-side accounting totals - compare with your usage API for this key:
   accepted requests:   10
   prompt tokens:       120
-  completion tokens:   256
-  sum of cost headers: 0.000172 USD (10 of 10 had a numeric header)
+  completion tokens:   264
+  sum of cost headers: 0.000176 USD (10 of 10 had a numeric header)
 
 Over-admission check OK: 10 accepted <= limit 10.
 ```
@@ -126,20 +126,20 @@ requests, tokens and cost reconcile
 ```text
 requests           client       10   usage API       10   match
 prompt tokens      client      120   usage API      120   match
-completion tokens  client      256   usage API      256   match
-cost (USD)         client 0.000172   usage API 0.000172   match (exact: 171600 nano-USD)
+completion tokens  client      264   usage API      264   match
+cost (USD)         client 0.000176   usage API 0.000176   match (exact: 176400 nano-USD)
 ```
 
 ### 7. Latency summary  (info)
 
-gateway median 48 ms total, 12 ms overhead
+gateway median 80 ms total, 20 ms overhead
 
 ```text
                                     min  median    p95    max   (ms, 10 accepted requests)
-gateway total (latency_ms)           44      48     52     52
-waiting on provider (upstream_ms)     30      35     38     38
-gateway overhead (difference)         8      12     21     21
-load-test script, its own view              257    312   (avg and p95; includes client-side start-up)
+gateway total (latency_ms)           73      80     90     90
+waiting on provider (upstream_ms)     50      58     65     65
+gateway overhead (difference)        10      20     37     37
+load-test script, its own view              239    323   (avg and p95; includes client-side start-up)
 ```
 
 ### 8. Cache tenant isolation and persistence  (PASS)
