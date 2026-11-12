@@ -1,0 +1,36 @@
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49706)
+Traceback (most recent call last):
+  File "C:\Python314\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "C:\Python314\Lib\http\server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Python314\Lib\http\server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "C:\Users\rohisarkar\Desktop\Prism\Prism\scripts\mock_provider.py", line 164, in do_POST
+    self._send_json(200, {
+    ~~~~~~~~~~~~~~~^^^^^^^
+        "id": completion_id,
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+        "usage": usage,
+        ^^^^^^^^^^^^^^^
+    })
+    ^^
+  File "C:\Users\rohisarkar\Desktop\Prism\Prism\scripts\mock_provider.py", line 92, in _send_json
+    self.wfile.write(body)
+    ~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Python314\Lib\socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+ConnectionAbortedError: [WinError 10053] An established connection was aborted by the software in your host machine
+----------------------------------------

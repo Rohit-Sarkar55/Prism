@@ -282,6 +282,14 @@ Adjust to match what the repo already contains. Provided scripts and data may fi
 - REMAINING FOR THE USER: copy the new files, commit and push (including VERIFICATION.md), then record the
   explainer video (use the demo command and the console). Submission checklist: public repo link, README,
   seeded keys + reproduce instructions (README section "Reproduce the demo"), VERIFICATION.md, video.
+- DEMO LAYOUT FIXED (after the user ran it on Windows): the user's paste showed words running together
+  ("alpha-smallcache miss") on the long lines of steps 3, 4 and 6. Probably a terminal-wrap copy artifact (the
+  same thing happened earlier with "APdatabase"), but long lines would also wrap messily on a recording, so the
+  output was reshaped: compact rows (`HTTP 200  alpha/alpha-small  cache miss $0.0000135`), wrapped intro
+  paragraphs, a wrapped streamed paragraph, shorter labels and notes. Longest line went from 186 to 100
+  characters. `tests/test_demo.py` now runs every step against a fake gateway and fails if a line exceeds 100
+  characters, if columns run together, if the streamed text is not wrapped, or if the rate-limit tally is wrong;
+  mutation-tested (four reintroduced layout bugs, all caught). 304 tests pass in the sandbox.
 - SANDBOX LESSONS (for whoever drives the sandbox): never `kill` from stale PID files (PIDs get reused, one
   killed the tool's own shell), never `pkill -f` a pattern that appears in the same command line, find a
   process by its exact command instead.

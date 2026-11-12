@@ -12,6 +12,7 @@ needs a clean database (an unspent budget key and an unused rate-limit window), 
 import argparse
 import json
 import sys
+import textwrap
 import time
 from dataclasses import dataclass
 
@@ -49,7 +50,7 @@ def problems_with_state(keys: list[dict]) -> list[str]:
 def describe(resp: httpx.Response) -> str:
     h = resp.headers
     served = h.get("x-prism-provider", "none")
-    return f"HTTP {resp.status_code}  served by {served:<18} cache {h.get('x-prism-cache', '-'):<4} cost {fmt_cost(h.get('x-prism-cost-usd'))}"
+    return f"HTTP {resp.status_code}  {served:<18} cache {h.get('x-prism-cache', '-'):<4} {fmt_cost(h.get('x-prism-cost-usd'))}"
 
 
 @dataclass
@@ -78,10 +79,11 @@ class Demo:
         self.client.post(f"http://127.0.0.1:{port}/admin/config", json=config).raise_for_status()
 
     def step(self, number: int, total: int, title: str, intro: str) -> None:
-        print(f"\n{'=' * 78}\nSTEP {number}/{total}: {title}\n{'=' * 78}\n{intro}\n")
+        print(f"\n{'=' * 78}\nSTEP {number}/{total}: {title}\n{'=' * 78}")
+        print(textwrap.fill(intro, width=78) + "\n")
 
     def line(self, label: str, resp: httpx.Response) -> None:
-        print(f"  {label:<52} {describe(resp)}")
+        print(f"  {label:<46} {describe(resp)}")
 
     def wait(self) -> None:
         if self.pause:
@@ -103,7 +105,7 @@ def step_streaming(d: Demo) -> None:
         "stream": True,
         "messages": [{"role": "user", "content": "Explain how server-sent events work in some detail please"}],
     }
-    started, first, chunks = time.monotonic(), None, 0
+    started, first, chunks, column = time.monotonic(), None, 0, 2
     print("  ", end="", flush=True)
     with d.client.stream(
         "POST", f"{d.base}/v1/chat/completions", json=body, headers={"Authorization": f"Bearer {KEY['search']}"}
@@ -120,14 +122,17 @@ def step_streaming(d: Demo) -> None:
             if text and first is None:
                 first = time.monotonic() - started
             chunks += 1
+            if column + len(text) > 90:
+                print("\n  ", end="")
+                column = 2
             print(text, end="", flush=True)
+            column += len(text)
     total = time.monotonic() - started
     row = d.last_log("search")
+    print(f"\n\n  served by {provider}; {chunks} chunks; the stream ended with [DONE]")
+    print(f"  first token after {first * 1000:.0f} ms, last after {total * 1000:.0f} ms")
     print(
-        f"\n\n  served by {provider}; first token after {first * 1000:.0f} ms, last after {total * 1000:.0f} ms, {chunks} chunks, stream ended with [DONE]"
-    )
-    print(
-        f"  recorded in the log: status {row['status']}, {row['prompt_tokens']} tokens in / {row['completion_tokens']} out, cost {fmt_cost(row['cost_usd'])}"
+        f"  logged: {row['status']}, {row['prompt_tokens']} tokens in / {row['completion_tokens']} out, cost {fmt_cost(row['cost_usd'])}"
     )
 
 
@@ -146,7 +151,7 @@ def step_routing(d: Demo) -> None:
     for label, text in prompts:
         resp = d.ask("research", text, model="auto")
         row = d.last_log("research")
-        print(f"  {label:<40} {describe(resp)}\n  {'':<40} why: {row['route_reason']}\n")
+        print(f"  {label}\n    {describe(resp)}\n    why: {row['route_reason']}\n")
 
 
 def step_cache(d: Demo) -> None:
@@ -157,26 +162,26 @@ def step_cache(d: Demo) -> None:
         "A repeat costs nothing. A paraphrase is recognised by meaning. A look-alike with a different intent is not. And one team can never receive another team's cached answer.",
     )
     original = "How do I reset my password on the dashboard?"
-    d.line("search key: first ask", d.ask("search", original))
-    d.line("search key: exact repeat", d.ask("search", original))
+    d.line("search: first ask", d.ask("search", original))
+    d.line("search: exact repeat", d.ask("search", original))
     d.line(
-        "search key: PARAPHRASE (same meaning, new words)",
+        "search: PARAPHRASE (same meaning, new words)",
         d.ask("search", "What are the steps to reset my dashboard password?"),
     )
     d.line(
-        "search key: LOOK-ALIKE (two-factor, not password)",
+        "search: LOOK-ALIKE (two-factor, not password)",
         d.ask("search", "How do I reset my two-factor authentication on the dashboard?"),
     )
-    d.line("free-tier key: the SAME prompt (another team)", d.ask("free-tier", original))
+    d.line("free-tier: the SAME prompt (another team)", d.ask("free-tier", original))
     print("\n  The other team got a real miss and paid for it: the cache is scoped per key, never shared.")
 
 
 def step_budget(d: Demo) -> None:
     d.step(4, 6, "Budget rejection", "This key's whole monthly budget is $0.00001. One request spends more than that.")
     text = "Explain what a message queue is and when a team should use one"
-    d.line("budget-demo key: first request", d.ask("budget-demo", text))
+    d.line("budget-demo: first request", d.ask("budget-demo", text))
     second = d.ask("budget-demo", text)
-    d.line("budget-demo key: second request", second)
+    d.line("budget-demo: second request", second)
     print(f"\n  rejected with HTTP 402: {second.json()['error']['message']}")
 
 
@@ -191,10 +196,9 @@ def step_rate_limit(d: Demo) -> None:
         retry = f"   Retry-After {resp.headers['retry-after']} s" if resp.status_code == 429 else ""
         print(f"  request {i:>2}: HTTP {resp.status_code}{retry}")
     accepted, limited = statuses.count(200), statuses.count(429)
-    print(
-        f"\n  {accepted} accepted, {limited} rate limited (type rate_limit_exceeded): {used + accepted} requests got through"
-    )
-    print("  in the minute, which is the key's limit. scripts/load_test.py fires a concurrent burst at the same limit.")
+    print(f"\n  {accepted} accepted, {limited} rate limited (type rate_limit_exceeded).")
+    print(f"  {used + accepted} requests got through in the minute: the key's limit of 10.")
+    print("  (scripts/load_test.py fires a concurrent burst at the same limit.)")
 
 
 def step_failover(d: Demo) -> None:
@@ -205,22 +209,23 @@ def step_failover(d: Demo) -> None:
         "alpha is the primary for 'fast', beta is the fallback. We break alpha while the gateway is running.",
     )
     q = "What is a message queue?"
+
+    def note(resp: httpx.Response, started: float, why: str) -> None:
+        took = time.monotonic() - started
+        print(f"    fallback header: {resp.headers.get('x-prism-fallback')}, answered in {took:.2f} s ({why})")
+
     try:
         d.line("healthy", d.ask("research", q))
         d.mock("alpha", mode="down")
         started = time.monotonic()
         resp = d.ask("research", q)
         d.line("alpha DOWN", resp)
-        print(
-            f"  {'':<52} fallback header: {resp.headers.get('x-prism-fallback')}   answered in {time.monotonic() - started:.2f} s (retried with backoff, then failed over)"
-        )
+        note(resp, started, "retried with backoff, then failed over")
         d.mock("alpha", mode="ok", latency_ms=3000)
         started = time.monotonic()
         resp = d.ask("research", q)
-        d.line("alpha SLOW (3 s, the timeout is 2 s)", resp)
-        print(
-            f"  {'':<52} fallback header: {resp.headers.get('x-prism-fallback')}   answered in {time.monotonic() - started:.2f} s (timeout, then failed over: never hangs)"
-        )
+        d.line("alpha SLOW (3 s; the timeout is 2 s)", resp)
+        note(resp, started, "timeout, then failed over: never hangs")
     finally:
         d.mock("alpha", mode="ok", latency_ms=0, fail_rate=0)
     d.line("alpha RESTORED", d.ask("research", q))
