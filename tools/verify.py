@@ -1,6 +1,7 @@
 """One-command verification of the whole gateway. It starts a fresh private stack (empty database, both mock
 providers, the gateway), runs every check the brief asks to be verified, and writes VERIFICATION.md.
 
+
     python -m tools.verify                    # everything, about two minutes
     python -m tools.verify --skip-tests       # skip the pytest run
     python -m tools.verify --output report.md # write the report somewhere else

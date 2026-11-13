@@ -1,5 +1,6 @@
 """A narrated walk through the whole gateway, in the order of the brief's demo checklist.
 
+
     python -m tools.dev_stack --fresh-db     # terminal 1: start the stack on a clean database, leave it running
     python -m tools.demo                     # terminal 2: press Enter between steps while you talk
     python -m tools.demo --no-pause          # run straight through
